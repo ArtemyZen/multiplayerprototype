@@ -1,0 +1,15 @@
+{
+    "name": "PhotonVoice.Editor",
+    "references": [
+        "Photon.Realtime",
+        "PhotonVoice",
+        "PhotonVoice.API"
+    ],
+    "optionalUnityReferences": [],
+    "includePlatforms": [
+        "Editor"
+    ],
+    "excludePlatforms": [],
+    "allowUnsafeCode": false,
+    "defineConstraints": []
+}

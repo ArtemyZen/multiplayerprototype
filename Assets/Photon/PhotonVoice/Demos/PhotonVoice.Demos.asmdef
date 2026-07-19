@@ -1,0 +1,23 @@
+{
+    "name": "PhotonVoice.Demos",
+    "rootNamespace": "",
+    "references": [
+        "PhotonVoice",
+        "PhotonVoice.API",
+        "PhotonVoice.PUN",
+        "PhotonUnityNetworking",
+        "Photon.Realtime"
+    ],
+    "includePlatforms": [],
+    "excludePlatforms": [],
+    "allowUnsafeCode": false,
+    "overrideReferences": false,
+    "precompiledReferences": [],
+    "autoReferenced": true,
+    "defineConstraints": [
+        "PHOTON_ENABLE_LEGACY_VOICE",
+        "PHOTON_ENABLE_LEGACY_PUN"
+    ],
+    "versionDefines": [],
+    "noEngineReferences": false
+}

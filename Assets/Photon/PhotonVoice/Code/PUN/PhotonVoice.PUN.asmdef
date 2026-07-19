@@ -1,0 +1,15 @@
+{
+    "name": "PhotonVoice.PUN",
+    "references": [
+        "PhotonVoice",
+        "PhotonUnityNetworking",
+        "Photon.Realtime",
+        "PhotonVoice.API"
+    ],
+    "includePlatforms": [],
+    "excludePlatforms": [],
+    "defineConstraints": [
+        "PHOTON_ENABLE_LEGACY_PUN",
+        "PHOTON_ENABLE_LEGACY_VOICE"
+    ]
+}

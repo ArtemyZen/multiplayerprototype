@@ -1,0 +1,19 @@
+{
+    "name": "PhotonVoiceApi.FMOD",
+    "references": [
+        "PhotonVoice.API",
+        "FMODUnity"
+    ],
+    "includePlatforms": [],
+    "excludePlatforms": [],
+    "allowUnsafeCode": false,
+    "overrideReferences": false,
+    "precompiledReferences": [],
+    "autoReferenced": true,
+    "defineConstraints": [
+        "PHOTON_VOICE_FMOD_ENABLE",
+        "PHOTON_ENABLE_LEGACY_VOICE"
+    ],
+    "versionDefines": [],
+    "noEngineReferences": false
+}

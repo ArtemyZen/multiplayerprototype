@@ -1,0 +1,14 @@
+{
+    "name": "PhotonUnityNetworking.Utilities",
+    "references": [
+        "Photon.Realtime",
+        "PhotonUnityNetworking"
+    ],
+    "optionalUnityReferences": [],
+    "includePlatforms": [],
+    "excludePlatforms": [],
+    "allowUnsafeCode": false,
+    "defineConstraints": [
+        "PHOTON_ENABLE_LEGACY_PUN"
+    ]
+}

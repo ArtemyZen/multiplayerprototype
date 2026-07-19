@@ -1,0 +1,16 @@
+{
+    "name": "PhotonUnityNetworking.Editor",
+    "references": [
+        "Photon.Realtime",
+        "PhotonUnityNetworking"
+    ],
+    "optionalUnityReferences": [],
+    "includePlatforms": [
+        "Editor"
+    ],
+    "excludePlatforms": [],
+    "allowUnsafeCode": false,
+    "defineConstraints": [
+        "PHOTON_ENABLE_LEGACY_PUN"
+    ]
+}

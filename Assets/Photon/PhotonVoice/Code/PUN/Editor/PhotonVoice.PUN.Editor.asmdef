@@ -1,0 +1,18 @@
+{
+    "name": "PhotonVoice.PUN.Editor",
+    "references": [
+        "PhotonVoice.PUN",
+        "PhotonVoice.Editor",
+        "PhotonVoice",
+        "Photon.Realtime",
+        "PhotonUnityNetworking"
+    ],
+    "includePlatforms": [
+        "Editor"
+    ],
+    "excludePlatforms": [],
+    "defineConstraints": [
+        "PHOTON_ENABLE_LEGACY_PUN",
+        "PHOTON_ENABLE_LEGACY_VOICE"
+    ]
+}
