@@ -19,6 +19,7 @@ namespace FriendSlop
 
         [Header("Physics")]
         public float HeldCollisionSkin = 0.03f;
+        public int HeldCollisionResolveIterations = 3;
         public bool ForceDynamicInterpolation = true;
         public float MaxHoldSpeed = 18f;
         public float ProxyLerpSpeed = 18f;
@@ -85,6 +86,7 @@ namespace FriendSlop
             WeightReductionPerHolder = Mathf.Max(0, WeightReductionPerHolder);
             HeavyWeightMassMultiplier = Mathf.Max(1f, HeavyWeightMassMultiplier);
             HeldCollisionSkin = Mathf.Max(0f, HeldCollisionSkin);
+            HeldCollisionResolveIterations = Mathf.Max(1, HeldCollisionResolveIterations);
             HoldTargetSmoothing = Mathf.Max(0f, HoldTargetSmoothing);
             HoldHeartbeatTimeout = Mathf.Max(0.05f, HoldHeartbeatTimeout);
             ReleaseHoldIgnoreTime = Mathf.Max(0f, ReleaseHoldIgnoreTime);
@@ -226,7 +228,7 @@ namespace FriendSlop
             if (!forceLocalPrediction && (!HasStateAuthority || !IsHeldBy(holder)))
                 return;
 
-            var resolvedPosition = forceLocalPrediction ? targetPosition : ResolveHeldTargetPosition(targetPosition);
+            var resolvedPosition = ResolveHeldTargetPosition(targetPosition);
             _rigidbody.position = resolvedPosition;
             _rigidbody.rotation = targetRotation;
             transform.SetPositionAndRotation(resolvedPosition, targetRotation);
@@ -296,7 +298,7 @@ namespace FriendSlop
             _rigidbody.useGravity = true;
             _rigidbody.drag = 0f;
             _rigidbody.angularDrag = 0.05f;
-            _rigidbody.collisionDetectionMode = _initialCollisionDetectionMode;
+            _rigidbody.collisionDetectionMode = CollisionDetectionMode.ContinuousDynamic;
             ApplyDynamicInterpolation();
             _rigidbody.WakeUp();
             _rigidbody.velocity = releaseVelocity;
@@ -347,39 +349,55 @@ namespace FriendSlop
 
         private Vector3 ResolveHeldTargetPosition(Vector3 targetPosition)
         {
-            var currentPosition = _rigidbody.position;
-            var delta = targetPosition - currentPosition;
-            var distance = delta.magnitude;
+            var resolvedPosition = _rigidbody.position;
+            var desiredPosition = targetPosition;
+            var iterations = Mathf.Max(1, HeldCollisionResolveIterations);
 
-            if (distance <= 0.0001f)
-                return targetPosition;
-
-            var direction = delta / distance;
-            var hits = _rigidbody.SweepTestAll(direction, distance + HeldCollisionSkin, QueryTriggerInteraction.Ignore);
-            System.Array.Sort(hits, (left, right) => left.distance.CompareTo(right.distance));
-
-            foreach (var hit in hits)
+            for (int iteration = 0; iteration < iterations; iteration++)
             {
-                if (hit.collider == null || ContainsCollider(hit.collider))
-                    continue;
+                var delta = desiredPosition - resolvedPosition;
+                var distance = delta.magnitude;
 
-                var grabbable = hit.collider.GetComponentInParent<GrabbablePhysicsObject>();
-                if (grabbable != null)
-                    continue;
+                if (distance <= 0.0001f)
+                    return desiredPosition;
 
-                var attachedRigidbody = hit.collider.attachedRigidbody;
-                if (attachedRigidbody != null && !attachedRigidbody.isKinematic)
-                    continue;
+                var direction = delta / distance;
+                var hits = _rigidbody.SweepTestAll(direction, distance + HeldCollisionSkin, QueryTriggerInteraction.Ignore);
+                System.Array.Sort(hits, (left, right) => left.distance.CompareTo(right.distance));
 
-                var safeDistance = Mathf.Max(0f, hit.distance - HeldCollisionSkin);
-                var blockedPosition = currentPosition + direction * Mathf.Min(safeDistance, distance);
-                var remainingDelta = targetPosition - blockedPosition;
-                var slideDelta = Vector3.ProjectOnPlane(remainingDelta, hit.normal);
+                var blocked = false;
+                foreach (var hit in hits)
+                {
+                    if (ShouldIgnoreHeldSweepHit(hit.collider))
+                        continue;
 
-                return blockedPosition + slideDelta;
+                    var safeDistance = Mathf.Max(0f, hit.distance - HeldCollisionSkin);
+                    var blockedPosition = resolvedPosition + direction * Mathf.Min(safeDistance, distance);
+                    var remainingDelta = desiredPosition - blockedPosition;
+                    desiredPosition = blockedPosition + Vector3.ProjectOnPlane(remainingDelta, hit.normal);
+                    resolvedPosition = blockedPosition;
+                    blocked = true;
+                    break;
+                }
+
+                if (!blocked)
+                    return desiredPosition;
             }
 
-            return targetPosition;
+            return resolvedPosition;
+        }
+
+        private bool ShouldIgnoreHeldSweepHit(Collider hitCollider)
+        {
+            if (hitCollider == null || ContainsCollider(hitCollider))
+                return true;
+
+            var grabbable = hitCollider.GetComponentInParent<GrabbablePhysicsObject>();
+            if (grabbable != null)
+                return true;
+
+            var attachedRigidbody = hitCollider.attachedRigidbody;
+            return attachedRigidbody != null && !attachedRigidbody.isKinematic;
         }
 
         private bool EnsureHolderActive(PlayerRef holder)

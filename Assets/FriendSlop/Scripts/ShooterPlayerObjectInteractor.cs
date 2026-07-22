@@ -48,6 +48,7 @@ namespace FriendSlop
         public float HolderValidationGiveUpTime = 4f;
         public float MaxHoldStretchDistance = 3.5f;
         public int HoldStretchReleaseTicks = 8;
+        [Range(0.1f, 1f)] public float MinThrowHeldDistanceRatio = 0.8f;
 
         [Header("Catch Assist")]
         public bool EnableCatchAssist = true;
@@ -942,9 +943,8 @@ namespace FriendSlop
                 return;
 
             RememberReleasedObject(_heldObject);
-            var forward = GetAimForward();
             SetHeldObjectPlayerCollisionIgnored(false);
-            _heldObject.EndGrab(InteractionPlayer, GetHoldPosition() + forward * DropForwardOffset, Vector3.zero);
+            _heldObject.EndGrab(InteractionPlayer, _heldObject.Position, Vector3.zero);
             ClearHeldObjectWithCooldown(GrabCooldownTime);
         }
 
@@ -998,9 +998,27 @@ namespace FriendSlop
             RememberReleasedObject(_heldObject);
             var forward = GetAimForward();
             var throwEfficiency = WeakenThrowWhenHolding ? GetHeldWeightEfficiency() : 1f;
+            var throwVelocity = IsHeldObjectCompressedTowardCamera()
+                ? Vector3.zero
+                : forward * ThrowImpulse * throwEfficiency;
+
             SetHeldObjectPlayerCollisionIgnored(false);
-            _heldObject.EndGrab(InteractionPlayer, GetHoldPosition(), forward * ThrowImpulse * throwEfficiency);
+            _heldObject.EndGrab(InteractionPlayer, _heldObject.Position, throwVelocity);
             ClearHeldObjectWithCooldown(GrabCooldownTime);
+        }
+
+        private bool IsHeldObjectCompressedTowardCamera()
+        {
+            if (_heldObject == null || _player == null || _player.CameraHandle == null)
+                return false;
+
+            var cameraPosition = _player.CameraHandle.position;
+            var holdDistance = Vector3.Distance(cameraPosition, GetHoldPosition());
+            if (holdDistance <= 0.0001f)
+                return false;
+
+            var objectDistance = Vector3.Distance(cameraPosition, _heldObject.Center);
+            return objectDistance < holdDistance * MinThrowHeldDistanceRatio;
         }
 
         private void RememberReleasedObject(GrabbablePhysicsObject releasedObject)
