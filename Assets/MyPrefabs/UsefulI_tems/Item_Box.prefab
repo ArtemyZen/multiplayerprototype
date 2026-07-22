@@ -18,6 +18,7 @@ GameObject:
   - component: {fileID: 770100001503406493}
   - component: {fileID: 770100001503406593}
   - component: {fileID: 770100001503406693}
+  - component: {fileID: 770100001503406793}
   m_Layer: 0
   m_Name: Item_Box
   m_TagString: Untagged
@@ -194,6 +195,7 @@ MonoBehaviour:
   NetworkedBehaviours:
   - {fileID: 770100001503406593}
   - {fileID: 770100001503406693}
+  - {fileID: 770100001503406793}
   ForceRemoteRenderTimeframe: 0
 --- !u!114 &770100001503406593
 MonoBehaviour:
@@ -209,9 +211,11 @@ MonoBehaviour:
   m_EditorClassIdentifier: 
   WeightLevel: 1
   HeavyWeightEfficiency: 0.02
-  WeightReductionPerHolder: 2
+  WeightReductionPerHolder: 1
   ApplyWeightToRigidbodyMass: 1
   HeavyWeightMassMultiplier: 5
+  HeldCollisionSkin: 0.03
+  ForceDynamicInterpolation: 1
   MaxHoldSpeed: 18
   ProxyLerpSpeed: 18
   HoldTargetSmoothing: 18
@@ -239,6 +243,28 @@ MonoBehaviour:
   CargoLocalCenter: {x: 0, y: 0.35, z: 0}
   CargoLocalSize: {x: 0.5, y: 0.5, z: 0.5}
   MaxCargoColliders: 32
+--- !u!114 &770100001503406793
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 99203554599228814}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 4f39da54d5b24f0489a62d3b8d3ea521, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: 
+  Active: 1
+  OnlyWhenContainerHeld: 1
+  CargoMask:
+    serializedVersion: 2
+    m_Bits: 4294967295
+  LocalCenter: {x: 0, y: 0.35, z: 0}
+  LocalSize: {x: 0.5, y: 0.5, z: 0.5}
+  MaxCargoColliders: 32
+  DisableCargoCollidersWhileLocked: 1
+  ReleaseDelay: 2
 --- !u!1001 &2284177469070955847
 PrefabInstance:
   m_ObjectHideFlags: 0

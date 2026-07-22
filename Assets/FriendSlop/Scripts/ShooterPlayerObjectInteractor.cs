@@ -27,6 +27,7 @@ namespace FriendSlop
 
         [Header("Interact")]
         public float InteractDistance = 3f;
+        public float InteractCooldownTime = 0.25f;
 
         [Header("Grab")]
         public float GrabDistance = 3f;
@@ -54,6 +55,7 @@ namespace FriendSlop
         public float CatchRadius = 0.85f;
         public float CatchMinObjectSpeed = 1.5f;
         [Range(0f, 180f)] public float CatchMaxAngle = 80f;
+        public float SelfCatchBlockTime = 0.6f;
 
         [Header("Player Carry")]
         public bool CanCarryPlayers = true;
@@ -83,10 +85,12 @@ namespace FriendSlop
         private TickTimer _holderValidationGraceTimer;
         private TickTimer _holderValidationRetryTimer;
         private TickTimer _holderValidationGiveUpTimer;
+        private TickTimer _interactCooldownTimer;
         private int _obstructedTicks;
         private int _overstretchedTicks;
         private bool _wasAlive;
         private bool _grabHeld;
+        private bool _grabPressed;
         private bool _grabRequiresRelease;
         private bool _throwPressed;
         private bool _interactPressed;
@@ -94,10 +98,14 @@ namespace FriendSlop
         private float _baseWalkSpeed;
         private Image _crosshairImage;
         private bool _crosshairSearched;
+        private GrabbablePhysicsObject _recentlyReleasedObject;
+        private TickTimer _selfCatchBlockTimer;
 
         [Networked] public NetworkBool StickyHandActive { get; private set; }
         [Networked] public Vector3 StickyHandTargetPosition { get; private set; }
         public bool CanReadStickyHandState => Object != null && Object.IsValid;
+        private bool CanUseNetworkState => Object != null && Object.IsValid;
+        private PlayerRef InteractionPlayer => Object != null && Object.InputAuthority != PlayerRef.None ? Object.InputAuthority : Object.StateAuthority;
 
         public override void Spawned()
         {
@@ -106,28 +114,35 @@ namespace FriendSlop
             _playerColliders = GetComponentsInChildren<Collider>();
             _baseWalkSpeed = _player.WalkSpeed;
             _wasAlive = IsPlayerAlive();
-            SetHoldingPoseActive(false);
-            enabled = HasStateAuthority;
+            enabled = HasInputAuthority;
+
+            if (HasInputAuthority || HasStateAuthority)
+                SetHoldingPoseActive(false);
         }
 
         private void Update()
         {
-            if (!HasStateAuthority)
+            if (!HasInputAuthority)
                 return;
 
             if (Cursor.lockState != CursorLockMode.Locked)
             {
+                _grabPressed = false;
                 RefreshCrosshair(false);
                 return;
             }
 
             var grabButtonHeld = Input.GetKey(GrabKey);
             if (!grabButtonHeld)
+            {
                 _grabRequiresRelease = false;
+                _grabPressed = false;
+            }
 
             if (!IsPlayerAlive())
             {
                 _grabHeld = false;
+                _grabPressed = false;
                 _grabRequiresRelease = true;
                 _throwPressed = false;
                 _interactPressed = false;
@@ -140,6 +155,7 @@ namespace FriendSlop
             if (_selfCarryable != null && _selfCarryable.IsCarried)
             {
                 _grabHeld = false;
+                _grabPressed = false;
                 _grabRequiresRelease = true;
                 _throwPressed = false;
                 _interactPressed = false;
@@ -150,6 +166,7 @@ namespace FriendSlop
             }
 
             _grabHeld = grabButtonHeld && !_grabRequiresRelease;
+            _grabPressed |= Input.GetKeyDown(GrabKey) && !_grabRequiresRelease;
             _grabHoldMoveInput = new Vector2(Input.GetAxisRaw("Horizontal"), Input.GetAxisRaw("Vertical"));
 
             _throwPressed |= Input.GetKeyDown(ThrowKey);
@@ -160,7 +177,7 @@ namespace FriendSlop
 
         public override void FixedUpdateNetwork()
         {
-            if (!HasStateAuthority)
+            if (!HasInputAuthority)
                 return;
 
             var isAlive = IsPlayerAlive();
@@ -170,6 +187,7 @@ namespace FriendSlop
                 ReleaseHeldObjectAtCurrentPosition(true);
                 ReleaseCarriedPlayer(true);
                 _grabHeld = false;
+                _grabPressed = false;
                 _throwPressed = false;
                 _interactPressed = false;
                 _wasAlive = false;
@@ -229,7 +247,11 @@ namespace FriendSlop
             }
             else if (_interactPressed)
             {
-                TryInteract();
+                if (!_interactCooldownTimer.IsRunning || _interactCooldownTimer.Expired(Runner))
+                {
+                    if (TryInteract())
+                        _interactCooldownTimer = TickTimer.CreateFromSeconds(Runner, InteractCooldownTime);
+                }
             }
             else if (!_grabHeld)
             {
@@ -240,7 +262,7 @@ namespace FriendSlop
             else
             {
                 if (_activeGrabHoldInteractable != null)
-                    _activeGrabHoldInteractable.UpdateHold(Object.StateAuthority, Object, _grabHoldMoveInput);
+                    _activeGrabHoldInteractable.UpdateHold(InteractionPlayer, Object, _grabHoldMoveInput);
 
                 if (_activeGrabHoldInteractable == null && _heldObject == null && _carriedPlayer == null)
                     TryGrabTarget();
@@ -254,6 +276,7 @@ namespace FriendSlop
 
             _throwPressed = false;
             _interactPressed = false;
+            _grabPressed = false;
             UpdateStickyHandTarget();
             ApplyPlayerWeightEffect(GetActiveCarryEfficiency());
             SetHoldingPoseActive(ShouldShowHoldPose());
@@ -262,11 +285,32 @@ namespace FriendSlop
 
         private void OnDisable()
         {
-            ReleaseGrabHoldInteractable();
-            ReleaseCarriedPlayer(true);
-            SetHoldingPoseActive(false);
+            if (CanUseNetworkState)
+            {
+                ReleaseGrabHoldInteractable();
+                ReleaseCarriedPlayer(true);
+                SetHoldingPoseActive(false);
+            }
+            else
+            {
+                _activeGrabHoldInteractable = null;
+                _heldObject = null;
+                _carriedPlayer = null;
+                _grabHeld = false;
+                _throwPressed = false;
+                _interactPressed = false;
+            }
+
             ApplyPlayerWeightEffect(1f);
             SetFireBlocked(false);
+        }
+
+        private void LateUpdate()
+        {
+            if (!HasInputAuthority || _heldObject == null)
+                return;
+
+            _heldObject.PresentHeldLocally(InteractionPlayer, GetHoldPosition(), GetAimRotation(), !HasStateAuthority);
         }
 
         private bool IsPlayerAlive()
@@ -282,8 +326,16 @@ namespace FriendSlop
 
         private void SetHoldingPoseActive(bool active)
         {
-            if (_player != null && HasStateAuthority)
+            if (_player == null)
+                return;
+
+            if (!CanUseNetworkState)
+                return;
+
+            if (HasStateAuthority)
                 _player.HoldingItemPoseActive = active;
+            else
+                RPC_SetHoldingPoseActive(active);
         }
 
         private bool ShouldShowHoldPose()
@@ -363,12 +415,27 @@ namespace FriendSlop
         {
             if (_heldObject != null)
             {
-                StickyHandActive = true;
-                StickyHandTargetPosition = _heldObject.Center;
+                SetStickyHandState(true, _heldObject.Center);
                 return;
             }
 
-            StickyHandActive = false;
+            SetStickyHandState(false, default);
+        }
+
+        private void SetStickyHandState(bool active, Vector3 targetPosition)
+        {
+            if (!CanUseNetworkState)
+                return;
+
+            if (HasStateAuthority)
+            {
+                StickyHandActive = active;
+                StickyHandTargetPosition = targetPosition;
+            }
+            else
+            {
+                RPC_SetStickyHandState(active, targetPosition);
+            }
         }
 
         private float GetHeldWeightEfficiency()
@@ -394,7 +461,7 @@ namespace FriendSlop
             if (_heldObject == null)
                 return;
 
-            if (_heldObject.IsHeldBy(Object.StateAuthority))
+            if (_heldObject.IsHeldBy(InteractionPlayer))
             {
                 _holderValidationRetryTimer = default;
                 _holderValidationGiveUpTimer = default;
@@ -423,16 +490,16 @@ namespace FriendSlop
             if (_holderValidationRetryTimer.IsRunning && !_holderValidationRetryTimer.Expired(Runner))
                 return;
 
-            _heldObject.BeginGrab(Object.StateAuthority);
+            _heldObject.BeginGrab(InteractionPlayer);
 
             var holdEfficiency = WeakenHoldWhenHolding ? GetHeldWeightEfficiency() : 1f;
-            _heldObject.HoldAt(Object.StateAuthority, GetHoldPosition(), GetAimRotation(), HoldMoveSpeed * holdEfficiency);
+            _heldObject.HoldAt(InteractionPlayer, GetHoldPosition(), GetAimRotation(), HoldMoveSpeed * holdEfficiency);
             _holderValidationRetryTimer = TickTimer.CreateFromSeconds(Runner, HolderValidationRetryTime);
         }
 
         private bool IsHeldObjectConfirmed()
         {
-            return _heldObject != null && _heldObject.IsHeldBy(Object.StateAuthority);
+            return _heldObject != null && _heldObject.IsHeldBy(InteractionPlayer);
         }
 
         private bool IsHeldObjectAwaitingConfirmation()
@@ -446,7 +513,7 @@ namespace FriendSlop
                 return;
 
             SetHeldObjectPlayerCollisionIgnored(false);
-            _heldObject.EndGrab(Object.StateAuthority, _heldObject.Position, _heldObject.Velocity);
+            _heldObject.EndGrab(InteractionPlayer, _heldObject.Position, _heldObject.Velocity);
             ClearHeldObjectWithCooldown(GrabCooldownTime);
         }
 
@@ -455,7 +522,7 @@ namespace FriendSlop
             if (_carriedPlayer == null)
                 return;
 
-            if (!_carriedPlayer.IsAlive || !_carriedPlayer.IsCarried || _carriedPlayer.Carrier != Object.StateAuthority)
+            if (!_carriedPlayer.IsAlive || !_carriedPlayer.IsCarried || _carriedPlayer.Carrier != InteractionPlayer)
             {
                 if (_holderValidationGraceTimer.IsRunning && !_holderValidationGraceTimer.Expired(Runner))
                     return;
@@ -464,46 +531,47 @@ namespace FriendSlop
             }
         }
 
-        private void TryInteract()
+        private bool TryInteract()
         {
             if (_activeGrabHoldInteractable != null)
-                return;
+                return false;
 
             if (_heldObject != null)
             {
-                TryUseHeldObject();
-                return;
+                return TryUseHeldObject();
             }
 
             if (_carriedPlayer != null)
-                return;
+                return false;
 
-            TryInteractWithTarget();
+            return TryInteractWithTarget();
         }
 
-        private void TryUseHeldObject()
+        private bool TryUseHeldObject()
         {
             var action = FindInterfaceInChildren<IHeldItemAction>(_heldObject.transform);
             if (action == null)
-                return;
+                return false;
 
-            action.UseHeld(Object.StateAuthority, Object);
+            action.UseHeld(InteractionPlayer, Object);
+            return true;
         }
 
-        private void TryInteractWithTarget()
+        private bool TryInteractWithTarget()
         {
             var cameraHandle = _player.CameraHandle;
             if (cameraHandle == null)
-                return;
+                return false;
 
             if (!Physics.Raycast(cameraHandle.position, cameraHandle.forward, out var hit, InteractDistance, InteractMask, QueryTriggerInteraction.Ignore))
-                return;
+                return false;
 
             var interactable = FindInterfaceInParents<IWorldInteractable>(hit.collider.transform);
             if (interactable == null)
-                return;
+                return false;
 
-            interactable.Interact(Object.StateAuthority, Object);
+            interactable.Interact(InteractionPlayer, Object);
+            return true;
         }
 
         private void TryGrabTarget()
@@ -518,34 +586,74 @@ namespace FriendSlop
             if (cameraHandle == null)
                 return;
 
-            if (Physics.Raycast(cameraHandle.position, cameraHandle.forward, out var hit, GrabDistance, GrabMask, QueryTriggerInteraction.Ignore))
+            if (_grabPressed && TryGrabDirectTarget(cameraHandle))
+                return;
+
+            TryCatchFlyingObject(cameraHandle);
+        }
+
+        private bool TryGrabDirectTarget(Transform cameraHandle)
+        {
+            var hits = Physics.RaycastAll(cameraHandle.position, cameraHandle.forward, GrabDistance, GrabMask, QueryTriggerInteraction.Ignore);
+            SortHitsByDistance(hits);
+
+            for (int i = 0; i < hits.Length; i++)
             {
-                var grabHoldInteractable = FindInterfaceInParents<IGrabHoldInteractable>(hit.collider.transform);
-                if (grabHoldInteractable != null && grabHoldInteractable.BeginHold(Object.StateAuthority, Object))
+                var hitCollider = hits[i].collider;
+                if (hitCollider == null)
+                    continue;
+
+                var grabHoldInteractable = FindInterfaceInParents<IGrabHoldInteractable>(hitCollider.transform);
+                if (grabHoldInteractable != null)
                 {
-                    _activeGrabHoldInteractable = grabHoldInteractable;
-                    _obstructedTicks = 0;
-                    _overstretchedTicks = 0;
-                    SetHoldingPoseActive(false);
-                    return;
+                    if (grabHoldInteractable.BeginHold(InteractionPlayer, Object))
+                    {
+                        _activeGrabHoldInteractable = grabHoldInteractable;
+                        _obstructedTicks = 0;
+                        _overstretchedTicks = 0;
+                        SetHoldingPoseActive(false);
+                    }
+
+                    return true;
                 }
 
-                var grabbable = hit.collider.GetComponentInParent<GrabbablePhysicsObject>();
-                if (grabbable != null && grabbable.CanBeGrabbed)
+                var grabbable = hitCollider.GetComponentInParent<GrabbablePhysicsObject>();
+                if (grabbable != null)
                 {
-                    TryGrabObject(grabbable);
-                    return;
+                    if (grabbable.CanBeGrabbed && !IsSelfCatchBlocked(grabbable))
+                        TryGrabObject(grabbable);
+
+                    return true;
                 }
 
                 if (CanCarryPlayers)
                 {
-                    TryCarryPlayer(hit.collider.GetComponentInParent<CarryablePlayer>());
-                    if (_carriedPlayer != null)
-                        return;
+                    var carryablePlayer = hitCollider.GetComponentInParent<CarryablePlayer>();
+                    if (carryablePlayer != null)
+                    {
+                        TryCarryPlayer(carryablePlayer);
+                        return true;
+                    }
                 }
             }
 
-            TryCatchFlyingObject(cameraHandle);
+            return false;
+        }
+
+        private static void SortHitsByDistance(RaycastHit[] hits)
+        {
+            for (int i = 1; i < hits.Length; i++)
+            {
+                var hit = hits[i];
+                var j = i - 1;
+                while (j >= 0 && hits[j].distance > hit.distance)
+                {
+                    hits[j + 1] = hits[j];
+                    j--;
+                }
+
+                hits[j + 1] = hit;
+            }
         }
 
         private void TryCatchFlyingObject(Transform cameraHandle)
@@ -584,7 +692,10 @@ namespace FriendSlop
 
         private void TryScoreCatchCandidate(Transform cameraHandle, GrabbablePhysicsObject candidate, float hitDistance, ref GrabbablePhysicsObject bestCandidate, ref float bestScore)
         {
-            if (candidate == null || !candidate.CanBeGrabbed || candidate.IsHeldBy(Object.StateAuthority))
+            if (candidate == null || !candidate.CanBeGrabbed || candidate.IsHeldBy(InteractionPlayer))
+                return;
+
+            if (IsSelfCatchBlocked(candidate))
                 return;
 
             if (candidate.Velocity.sqrMagnitude < CatchMinObjectSpeed * CatchMinObjectSpeed)
@@ -606,9 +717,9 @@ namespace FriendSlop
             bestCandidate = candidate;
         }
 
-        private void TryGrabObject(GrabbablePhysicsObject grabbable)
+        private bool TryGrabObject(GrabbablePhysicsObject grabbable)
         {
-            if (grabbable.BeginGrab(Object.StateAuthority))
+            if (grabbable.BeginGrab(InteractionPlayer))
             {
                 _heldObject = grabbable;
                 SetHeldObjectPlayerCollisionIgnored(true);
@@ -621,7 +732,10 @@ namespace FriendSlop
                 _holderValidationGiveUpTimer = TickTimer.CreateFromSeconds(Runner, HolderValidationGiveUpTime);
                 SetHoldingPoseActive(true);
                 ApplyPlayerWeightEffect(GetHeldWeightEfficiency());
+                return true;
             }
+
+            return false;
         }
 
         private void TryCarryPlayer(CarryablePlayer target)
@@ -629,7 +743,7 @@ namespace FriendSlop
             if (target == null || target == _selfCarryable || !target.CanBeCarried)
                 return;
 
-            if (target.BeginCarry(Object.StateAuthority))
+            if (target.BeginCarry(InteractionPlayer))
             {
                 _carriedPlayer = target;
                 _obstructedTicks = 0;
@@ -668,7 +782,7 @@ namespace FriendSlop
             }
 
             var holdEfficiency = WeakenHoldWhenHolding ? GetHeldWeightEfficiency() : 1f;
-            _heldObject.HoldAt(Object.StateAuthority, GetHoldPosition(), GetAimRotation(), HoldMoveSpeed * holdEfficiency);
+            _heldObject.HoldAt(InteractionPlayer, GetHoldPosition(), GetAimRotation(), HoldMoveSpeed * holdEfficiency);
         }
 
         private bool IsHeldObjectTooFar()
@@ -839,9 +953,10 @@ namespace FriendSlop
             if (_heldObject == null)
                 return;
 
+            RememberReleasedObject(_heldObject);
             var forward = GetAimForward();
             SetHeldObjectPlayerCollisionIgnored(false);
-            _heldObject.EndGrab(Object.StateAuthority, GetHoldPosition() + forward * DropForwardOffset, Vector3.zero);
+            _heldObject.EndGrab(InteractionPlayer, GetHoldPosition() + forward * DropForwardOffset, Vector3.zero);
             ClearHeldObjectWithCooldown(GrabCooldownTime);
         }
 
@@ -850,7 +965,7 @@ namespace FriendSlop
             if (_carriedPlayer == null)
                 return;
 
-            _carriedPlayer.EndCarry(Object.StateAuthority, GetCarriedPlayerReleasePosition());
+            _carriedPlayer.EndCarry(InteractionPlayer, GetCarriedPlayerReleasePosition());
             ClearCarriedPlayerWithCooldown(GrabCooldownTime);
         }
 
@@ -859,8 +974,9 @@ namespace FriendSlop
             if (_heldObject == null)
                 return;
 
+            RememberReleasedObject(_heldObject);
             SetHeldObjectPlayerCollisionIgnored(false);
-            _heldObject.EndGrab(Object.StateAuthority, _heldObject.Position, Vector3.zero);
+            _heldObject.EndGrab(InteractionPlayer, _heldObject.Position, Vector3.zero);
             ClearHeldObjectWithCooldown(longCooldown ? RespawnGrabCooldownTime : GrabCooldownTime);
         }
 
@@ -869,7 +985,7 @@ namespace FriendSlop
             if (_carriedPlayer == null)
                 return;
 
-            _carriedPlayer.EndCarry(Object.StateAuthority, _carriedPlayer.transform.position);
+            _carriedPlayer.EndCarry(InteractionPlayer, _carriedPlayer.transform.position);
             ClearCarriedPlayerWithCooldown(longCooldown ? RespawnGrabCooldownTime : GrabCooldownTime);
         }
 
@@ -880,7 +996,7 @@ namespace FriendSlop
 
             var forward = GetAimForward();
             _carriedPlayer.EndCarry(
-                Object.StateAuthority,
+                InteractionPlayer,
                 GetCarriedPlayerPosition(),
                 forward * PlayerCarryThrowImpulse * CarriedPlayerEfficiency);
             ClearCarriedPlayerWithCooldown(GrabCooldownTime);
@@ -891,18 +1007,45 @@ namespace FriendSlop
             if (_heldObject == null)
                 return;
 
+            RememberReleasedObject(_heldObject);
             var forward = GetAimForward();
             var throwEfficiency = WeakenThrowWhenHolding ? GetHeldWeightEfficiency() : 1f;
             SetHeldObjectPlayerCollisionIgnored(false);
-            _heldObject.EndGrab(Object.StateAuthority, GetHoldPosition(), forward * ThrowImpulse * throwEfficiency);
+            _heldObject.EndGrab(InteractionPlayer, GetHoldPosition(), forward * ThrowImpulse * throwEfficiency);
             ClearHeldObjectWithCooldown(GrabCooldownTime);
+        }
+
+        private void RememberReleasedObject(GrabbablePhysicsObject releasedObject)
+        {
+            _recentlyReleasedObject = releasedObject;
+            _selfCatchBlockTimer = SelfCatchBlockTime > 0f && Runner != null
+                ? TickTimer.CreateFromSeconds(Runner, SelfCatchBlockTime)
+                : default;
+        }
+
+        private bool IsSelfCatchBlocked(GrabbablePhysicsObject candidate)
+        {
+            if (candidate == null || candidate != _recentlyReleasedObject)
+                return false;
+
+            if (!_selfCatchBlockTimer.IsRunning)
+                return false;
+
+            if (_selfCatchBlockTimer.Expired(Runner))
+            {
+                _recentlyReleasedObject = null;
+                _selfCatchBlockTimer = default;
+                return false;
+            }
+
+            return true;
         }
 
         private void ClearHeldObjectWithCooldown(float cooldown)
         {
             SetHeldObjectPlayerCollisionIgnored(false);
             _heldObject = null;
-            StickyHandActive = false;
+            SetStickyHandState(false, default);
             _grabRequiresRelease = true;
             _grabHeld = false;
             _obstructedTicks = 0;
@@ -917,7 +1060,7 @@ namespace FriendSlop
         private void ClearCarriedPlayerWithCooldown(float cooldown)
         {
             _carriedPlayer = null;
-            StickyHandActive = false;
+            SetStickyHandState(false, default);
             _grabRequiresRelease = true;
             _grabHeld = false;
             _obstructedTicks = 0;
@@ -932,7 +1075,7 @@ namespace FriendSlop
             if (_activeGrabHoldInteractable == null)
                 return;
 
-            _activeGrabHoldInteractable.EndHold(Object.StateAuthority, Object);
+            _activeGrabHoldInteractable.EndHold(InteractionPlayer, Object);
             _activeGrabHoldInteractable = null;
             _obstructedTicks = 0;
             _overstretchedTicks = 0;
@@ -1012,6 +1155,20 @@ namespace FriendSlop
         {
             var cameraHandle = _player.CameraHandle;
             return cameraHandle != null ? cameraHandle.forward : transform.forward;
+        }
+
+        [Rpc(RpcSources.InputAuthority, RpcTargets.StateAuthority, Channel = RpcChannel.Unreliable)]
+        private void RPC_SetHoldingPoseActive(NetworkBool active)
+        {
+            if (_player != null)
+                _player.HoldingItemPoseActive = active;
+        }
+
+        [Rpc(RpcSources.InputAuthority, RpcTargets.StateAuthority, Channel = RpcChannel.Unreliable)]
+        private void RPC_SetStickyHandState(NetworkBool active, Vector3 targetPosition)
+        {
+            StickyHandActive = active;
+            StickyHandTargetPosition = targetPosition;
         }
     }
 }

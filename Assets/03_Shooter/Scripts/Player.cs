@@ -27,6 +27,7 @@ namespace Starter.Shooter
 		[Header("Movement Setup")]
 		public float WalkSpeed = 2f;
 		public float JumpImpulse = 10f;
+		public float JumpInputCooldown = 0.15f;
 		public float UpGravity = 25f;
 		public float DownGravity = 40f;
 
@@ -88,6 +89,8 @@ namespace Starter.Shooter
 		private ShadowCastingMode[] _headRendererInitialShadowModes;
 		private bool _localHeadVisible;
 		private bool _localHeadVisibilityApplied;
+		private GameplayInput _inputAuthorityFallback;
+		private int _lastProcessedJumpSequence;
 
 		private GameManager _gameManager;
 		private bool CanReadNetworkedState => Object != null && Object.IsValid;
@@ -97,9 +100,15 @@ namespace Starter.Shooter
 			if (HasStateAuthority)
 			{
 				_gameManager = FindObjectOfType<GameManager>();
+			}
+
+			if (HasInputAuthority)
+			{
+				Object.EnableInterpolation = false;
+				FindObjectOfType<GameManager>()?.RegisterLocalPlayer(this);
 
 				// Set player nickname that is saved in UIGameMenu
-				Nickname = PlayerPrefs.GetString("PlayerName");
+				SetNickname(PlayerPrefs.GetString("PlayerName"));
 			}
 
 			// In case the nickname is already changed,
@@ -109,7 +118,7 @@ namespace Starter.Shooter
 			// Reset visible fire count
 			_visibleFireCount = _fireCount;
 
-			if (HasStateAuthority)
+			if (HasInputAuthority)
 			{
 				CacheHeadRendererModes();
 
@@ -138,15 +147,16 @@ namespace Starter.Shooter
 		{
 			bool isCarryControlled = _carryablePlayer != null && (_carryablePlayer.IsCarried || _carryablePlayer.IsCarryThrown);
 			bool isExternallyControlled = isCarryControlled;
-			PlayerInput.InputBlocked = isExternallyControlled;
+			if (HasInputAuthority)
+				PlayerInput.InputBlocked = isExternallyControlled;
 
-			if (KCC.Position.y < -15f)
+			if (HasStateAuthority && KCC.Position.y < -15f)
 			{
 				// Player fell, let's kill him
 				Health.TakeHit(1000);
 			}
 
-			if (Health.IsFinished)
+			if (HasStateAuthority && Health.IsFinished)
 			{
 				// Player is dead and death timer is finished, let's respawn the player
 				Respawn(_gameManager.GetSpawnPosition());
@@ -157,22 +167,39 @@ namespace Starter.Shooter
 				_moveVelocity = Vector3.zero;
 				_isJumping = false;
 				KCC.SetActive(Health.IsAlive);
-				PlayerInput.ResetInput();
 				return;
 			}
 
-			var input = Health.IsAlive ? PlayerInput.CurrentInput : default;
-			ProcessInput(input);
+			var input = default(GameplayInput);
+			if (Health.IsAlive && (HasStateAuthority || HasInputAuthority))
+			{
+				if (!GetInput(out input))
+				{
+					if (HasInputAuthority)
+					{
+						TryGetLocalPredictionInput(out input);
+					}
+					else if (HasStateAuthority)
+					{
+						input = _inputAuthorityFallback;
+					}
+				}
 
-			if (KCC.IsGrounded)
+				if (HasInputAuthority && !HasStateAuthority)
+				{
+					RPC_SubmitInputAuthorityFallback(input.LookRotation, input.MoveDirection, input.JumpSequence, input.Fire);
+				}
+
+				ProcessInput(input, HasStateAuthority);
+			}
+
+			if (HasStateAuthority && KCC.IsGrounded)
 			{
 				// Stop jumping
 				_isJumping = false;
 			}
 
 			KCC.SetActive(Health.IsAlive);
-
-			PlayerInput.ResetInput();
 		}
 
 		public override void Render()
@@ -181,7 +208,7 @@ namespace Starter.Shooter
 			bool isExternallyControlled = isCarryControlled;
 			PlayerInput.InputBlocked = isExternallyControlled;
 
-			if (HasStateAuthority && !isExternallyControlled)
+			if (HasInputAuthority && !isExternallyControlled)
 			{
 				// Set look rotation for Render.
 				KCC.SetLookRotation(PlayerInput.CurrentInput.LookRotation, -90f, 90f);
@@ -234,16 +261,18 @@ namespace Starter.Shooter
 			{
 				// Dummy IK solution, we are snapping chest bone to prepared ChestTargetPosition position
 				// Lerping blends the fixed position with little bit of animation position.
-				float blendAmount = holdingItemPoseActive ? (HasStateAuthority ? 0.05f : 0.2f) : EmptyHandsBodyAimBlend;
+				float blendAmount = holdingItemPoseActive ? (HasInputAuthority ? 0.05f : 0.2f) : EmptyHandsBodyAimBlend;
 				ChestBone.position = Vector3.Lerp(ChestTargetPosition.position, ChestBone.position, blendAmount);
 				ChestBone.rotation = Quaternion.Lerp(ChestTargetPosition.rotation, ChestBone.rotation, blendAmount);
 			}
 
 			// Only local player needs to update the camera
-			if (HasStateAuthority)
+			if (HasInputAuthority)
 			{
 				// Transfer properties from camera handle to Main Camera.
-				Camera.main.transform.SetPositionAndRotation(CameraHandle.position, CameraHandle.rotation);
+				var mainCamera = Camera.main;
+				if (mainCamera != null)
+					mainCamera.transform.SetPositionAndRotation(CameraHandle.position, CameraHandle.rotation);
 			}
 		}
 
@@ -263,7 +292,7 @@ namespace Starter.Shooter
 
 		private void SetLocalHeadVisible(bool visible)
 		{
-			if (!HasStateAuthority || HeadRenderers == null)
+			if (!HasInputAuthority || HeadRenderers == null)
 				return;
 
 			if (_localHeadVisibilityApplied && _localHeadVisible == visible && _headRendererInitialShadowModes != null)
@@ -285,7 +314,25 @@ namespace Starter.Shooter
 			}
 		}
 
-		private void ProcessInput(GameplayInput input)
+		private bool TryGetLocalPredictionInput(out GameplayInput input)
+		{
+			input = PlayerInput.LastSubmittedInput;
+			if (HasAnyInput(input))
+				return true;
+
+			input = PlayerInput.CurrentInput;
+			return HasAnyInput(input);
+		}
+
+		private static bool HasAnyInput(GameplayInput input)
+		{
+			return input.LookRotation != default ||
+			       input.MoveDirection != default ||
+			       input.JumpSequence != 0 ||
+			       input.Fire;
+		}
+
+		private void ProcessInput(GameplayInput input, bool updateNetworkState = true)
 		{
 			KCC.SetLookRotation(input.LookRotation, -90f, 90f);
 
@@ -310,12 +357,14 @@ namespace Starter.Shooter
 			_moveVelocity = Vector3.Lerp(_moveVelocity, desiredMoveVelocity, acceleration * Runner.DeltaTime);
 			float jumpImpulse = 0f;
 
-			// Comparing current input buttons to previous input buttons - this prevents glitches when input is lost
-			if (KCC.IsGrounded && input.Jump)
+			var hasNewJump = input.JumpSequence != 0 && input.JumpSequence != _lastProcessedJumpSequence;
+			if (KCC.IsGrounded && hasNewJump)
 			{
 				// Set world space jump vector
 				jumpImpulse = JumpImpulse;
-				_isJumping = true;
+				_lastProcessedJumpSequence = input.JumpSequence;
+				if (updateNetworkState)
+					_isJumping = true;
 			}
 
 			KCC.Move(_moveVelocity, jumpImpulse);
@@ -324,7 +373,7 @@ namespace Starter.Shooter
 			var pitchRotation = KCC.GetLookRotation(true, false);
 			CameraPivot.localRotation = Quaternion.Euler(pitchRotation);
 
-			if (input.Fire)
+			if (updateNetworkState && input.Fire)
 			{
 				Fire();
 			}
@@ -431,7 +480,7 @@ namespace Starter.Shooter
 				AudioSource.PlayClipAtPoint(LandAudioClip, KCC.Position, 1f);
 			}
 
-			if (HasStateAuthority == false)
+			if (HasInputAuthority == false)
 			{
 				ScalingRoot.localScale = _isJumping ? new Vector3(0.5f, 1.5f, 0.5f) : new Vector3(1.25f, 0.75f, 1.25f);
 			}
@@ -439,10 +488,35 @@ namespace Starter.Shooter
 
 		private void OnNicknameChanged()
 		{
-			if (HasStateAuthority)
+			if (HasInputAuthority)
 				return; // Do not show nickname for local player
 
 			Nameplate.SetNickname(Nickname);
 		}
+
+		private void SetNickname(string nickname)
+		{
+			if (HasStateAuthority)
+				Nickname = nickname;
+			else
+				RPC_SetNickname(nickname);
+		}
+
+		[Rpc(RpcSources.InputAuthority, RpcTargets.StateAuthority)]
+		private void RPC_SetNickname(string nickname)
+		{
+			Nickname = nickname;
+		}
+
+		[Rpc(RpcSources.InputAuthority, RpcTargets.StateAuthority, Channel = RpcChannel.Unreliable)]
+		private void RPC_SubmitInputAuthorityFallback(Vector2 lookRotation, Vector2 moveDirection, int jumpSequence, NetworkBool fire)
+		{
+			_inputAuthorityFallback.LookRotation = lookRotation;
+			_inputAuthorityFallback.MoveDirection = moveDirection;
+			_inputAuthorityFallback.Jump = jumpSequence != 0;
+			_inputAuthorityFallback.JumpSequence = jumpSequence;
+			_inputAuthorityFallback.Fire = fire;
+		}
+
 	}
 }

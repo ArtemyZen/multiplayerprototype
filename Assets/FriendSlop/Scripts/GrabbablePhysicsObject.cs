@@ -18,11 +18,16 @@ namespace FriendSlop
         public float HeavyWeightMassMultiplier = 5f;
 
         [Header("Physics")]
+        public float HeldCollisionSkin = 0.03f;
+        public bool ForceDynamicInterpolation = true;
         public float MaxHoldSpeed = 18f;
         public float ProxyLerpSpeed = 18f;
         public float HoldTargetSmoothing = 18f;
         [Tooltip("Drops a held object if no holder sends HoldAt for this many seconds.")]
         public float HoldHeartbeatTimeout = 0.75f;
+        [Tooltip("Ignores late hold RPCs from a player for a short time after that player released/threw this object.")]
+        public float ReleaseHoldIgnoreTime = 0.25f;
+        public float LocalReleasePredictionTime = 0.2f;
 
         [Networked, Capacity(16)] private NetworkLinkedList<PlayerRef> Holders => default;
         [Networked] public PlayerRef Holder { get; private set; }
@@ -52,8 +57,13 @@ namespace FriendSlop
         private TickTimer _holdHeartbeatTimer;
         private bool _collidersDisabledForPacking;
         private bool _packedPresentationApplied;
+        private bool _looseCargoLocked;
+        private bool _looseCargoCollidersDisabled;
+        private PlayerRef _recentReleaseHolder;
+        private TickTimer _recentReleaseIgnoreTimer;
+        private float _localReleasePresentationUntil;
 
-        public bool CanBeGrabbed => !IsPacked && Holders.Count < Holders.Capacity;
+        public bool CanBeGrabbed => !IsPacked && !_looseCargoLocked && Holders.Count < Holders.Capacity;
         public bool IsHeldBy(PlayerRef player) => IsHeld && Holders.Contains(player);
         public int HolderCount => Holders.Count;
         public int EffectiveWeightLevel => GetEffectiveWeightLevel(HolderCount);
@@ -62,6 +72,7 @@ namespace FriendSlop
         public Vector3 Velocity => _rigidbody != null ? _rigidbody.velocity : NetworkVelocity;
         public bool IsCurrentlyHeld => IsHeld;
         public bool IsPackedForCargo => IsPacked;
+        public bool IsLooseCargoLocked => _looseCargoLocked;
         public int CargoWeight => WeightLevel;
         public float WeightEfficiency => GetWeightEfficiencyForHolderCount(HolderCount);
         public float WeightT => GetWeightT(WeightLevel);
@@ -73,8 +84,11 @@ namespace FriendSlop
             HeavyWeightEfficiency = Mathf.Clamp(HeavyWeightEfficiency, 0.02f, 1f);
             WeightReductionPerHolder = Mathf.Max(0, WeightReductionPerHolder);
             HeavyWeightMassMultiplier = Mathf.Max(1f, HeavyWeightMassMultiplier);
+            HeldCollisionSkin = Mathf.Max(0f, HeldCollisionSkin);
             HoldTargetSmoothing = Mathf.Max(0f, HoldTargetSmoothing);
             HoldHeartbeatTimeout = Mathf.Max(0.05f, HoldHeartbeatTimeout);
+            ReleaseHoldIgnoreTime = Mathf.Max(0f, ReleaseHoldIgnoreTime);
+            LocalReleasePredictionTime = Mathf.Max(0f, LocalReleasePredictionTime);
         }
 
         private void ApplyWeightMass()
@@ -102,6 +116,7 @@ namespace FriendSlop
             _initialInterpolation = _rigidbody.interpolation;
             _initialMass = _rigidbody.mass;
             ApplyWeightMass();
+            ApplyDynamicInterpolation();
             ApplyAuthorityMode();
 
             if (HasStateAuthority)
@@ -130,6 +145,9 @@ namespace FriendSlop
             if (holder == PlayerRef.None)
                 return false;
 
+            if (ShouldIgnoreRecentReleaseHolder(holder))
+                return false;
+
             if (Holders.Contains(holder))
             {
                 RefreshHoldHeartbeat();
@@ -144,12 +162,14 @@ namespace FriendSlop
             RefreshHoldHeartbeat();
             _hasSmoothedHoldTarget = false;
 
-            _rigidbody.isKinematic = false;
+            _rigidbody.velocity = Vector3.zero;
+            _rigidbody.angularVelocity = Vector3.zero;
+            _rigidbody.isKinematic = true;
             _rigidbody.useGravity = false;
-            _rigidbody.drag = 8f;
-            _rigidbody.angularDrag = 8f;
-            _rigidbody.collisionDetectionMode = CollisionDetectionMode.ContinuousDynamic;
-            _rigidbody.interpolation = RigidbodyInterpolation.Interpolate;
+            _rigidbody.drag = 0f;
+            _rigidbody.angularDrag = 0f;
+            _rigidbody.collisionDetectionMode = CollisionDetectionMode.ContinuousSpeculative;
+            _rigidbody.interpolation = RigidbodyInterpolation.None;
             _rigidbody.WakeUp();
             CopyPhysicsToNetworkState();
             return true;
@@ -190,29 +210,176 @@ namespace FriendSlop
             _holdTargetPositionSum += targetPosition;
             RefreshHoldHeartbeat();
 
-            var blendedTargetPosition = _holdTargetPositionSum / _holdTargetCount;
-            if (!_hasSmoothedHoldTarget)
+            _smoothedHoldTargetPosition = _holdTargetPositionSum / _holdTargetCount;
+            _hasSmoothedHoldTarget = true;
+            _rigidbody.WakeUp();
+            _rigidbody.MovePosition(ResolveHeldTargetPosition(_smoothedHoldTargetPosition));
+            _rigidbody.MoveRotation(targetRotation);
+            CopyPhysicsToNetworkState();
+        }
+
+        public void PresentHeldLocally(PlayerRef holder, Vector3 targetPosition, Quaternion targetRotation, bool forceLocalPrediction = false)
+        {
+            if (_rigidbody == null || !_rigidbody.isKinematic)
+                return;
+
+            if (!forceLocalPrediction && (!HasStateAuthority || !IsHeldBy(holder)))
+                return;
+
+            var resolvedPosition = forceLocalPrediction ? targetPosition : ResolveHeldTargetPosition(targetPosition);
+            _rigidbody.position = resolvedPosition;
+            _rigidbody.rotation = targetRotation;
+            transform.SetPositionAndRotation(resolvedPosition, targetRotation);
+        }
+
+        public void PresentLooseCargoLocally(Transform containerTransform, Vector3 localPosition, Quaternion localRotation)
+        {
+            if (!_looseCargoLocked || _rigidbody == null || containerTransform == null)
+                return;
+
+            var targetPosition = containerTransform.TransformPoint(localPosition);
+            var targetRotation = containerTransform.rotation * localRotation;
+            _rigidbody.position = targetPosition;
+            _rigidbody.rotation = targetRotation;
+            transform.SetPositionAndRotation(targetPosition, targetRotation);
+        }
+
+        public void LockAsLooseCargo(NetworkObject container, Vector3 localPosition, Quaternion localRotation, bool disableColliders)
+        {
+            if (!HasStateAuthority || IsPacked || IsHeld || container == null || container == Object || _rigidbody == null)
+                return;
+
+            _looseCargoLocked = true;
+
+            if (disableColliders && !_looseCargoCollidersDisabled)
             {
-                _smoothedHoldTargetPosition = blendedTargetPosition;
-                _hasSmoothedHoldTarget = true;
-            }
-            else if (HoldTargetSmoothing > 0f)
-            {
-                var t = 1f - Mathf.Exp(-HoldTargetSmoothing * Runner.DeltaTime);
-                _smoothedHoldTargetPosition = Vector3.Lerp(_smoothedHoldTargetPosition, blendedTargetPosition, t);
-            }
-            else
-            {
-                _smoothedHoldTargetPosition = blendedTargetPosition;
+                SetCollidersEnabled(false);
+                _looseCargoCollidersDisabled = true;
             }
 
-            var delta = _smoothedHoldTargetPosition - _rigidbody.position;
-            var desiredVelocity = delta * moveSpeed;
-            _rigidbody.WakeUp();
-            _rigidbody.velocity = Vector3.ClampMagnitude(desiredVelocity, MaxHoldSpeed * WeightEfficiency);
-            _rigidbody.angularVelocity = Vector3.zero;
-            _rigidbody.MoveRotation(Quaternion.Slerp(_rigidbody.rotation, targetRotation, Runner.DeltaTime * moveSpeed));
+            var containerTransform = container.transform;
+            var targetPosition = containerTransform.TransformPoint(localPosition);
+            var targetRotation = containerTransform.rotation * localRotation;
+
+            if (!_rigidbody.isKinematic)
+            {
+                _rigidbody.velocity = Vector3.zero;
+                _rigidbody.angularVelocity = Vector3.zero;
+            }
+
+            _rigidbody.isKinematic = true;
+            _rigidbody.useGravity = false;
+            _rigidbody.drag = 0f;
+            _rigidbody.angularDrag = 0f;
+            _rigidbody.collisionDetectionMode = CollisionDetectionMode.ContinuousSpeculative;
+            _rigidbody.interpolation = RigidbodyInterpolation.None;
+            _rigidbody.MovePosition(targetPosition);
+            _rigidbody.MoveRotation(targetRotation);
+            transform.SetPositionAndRotation(targetPosition, targetRotation);
             CopyPhysicsToNetworkState();
+        }
+
+        public void UnlockLooseCargo(Vector3 releaseVelocity)
+        {
+            if (!_looseCargoLocked || _rigidbody == null)
+                return;
+
+            _looseCargoLocked = false;
+
+            if (_looseCargoCollidersDisabled)
+            {
+                RestoreColliderStates();
+                _looseCargoCollidersDisabled = false;
+            }
+
+            _rigidbody.isKinematic = false;
+            _rigidbody.useGravity = true;
+            _rigidbody.drag = 0f;
+            _rigidbody.angularDrag = 0.05f;
+            _rigidbody.collisionDetectionMode = _initialCollisionDetectionMode;
+            ApplyDynamicInterpolation();
+            _rigidbody.WakeUp();
+            _rigidbody.velocity = releaseVelocity;
+            _rigidbody.angularVelocity = Vector3.zero;
+            CopyPhysicsToNetworkState();
+        }
+
+        public void StabilizeLooseCargo(
+            Vector3 carrierVelocity,
+            Vector3 carrierAngularVelocity,
+            Vector3 carrierPivot,
+            float linearStrength,
+            float relativeDamping,
+            float maxAcceleration,
+            float angularStrength)
+        {
+            if (!HasStateAuthority || IsPacked || IsHeld || _rigidbody == null || _rigidbody.isKinematic)
+                return;
+
+            var deltaTime = Runner != null ? Runner.DeltaTime : Time.fixedDeltaTime;
+            if (deltaTime <= 0f)
+                return;
+
+            var pointVelocity = carrierVelocity + Vector3.Cross(carrierAngularVelocity, _rigidbody.worldCenterOfMass - carrierPivot);
+            var velocityDelta = (pointVelocity - _rigidbody.velocity) * Mathf.Clamp01(linearStrength);
+            var maxDelta = Mathf.Max(0f, maxAcceleration) * deltaTime;
+            if (maxDelta > 0f)
+                velocityDelta = Vector3.ClampMagnitude(velocityDelta, maxDelta);
+
+            _rigidbody.WakeUp();
+            _rigidbody.velocity += velocityDelta;
+
+            if (relativeDamping > 0f)
+            {
+                var damping = 1f - Mathf.Exp(-relativeDamping * deltaTime);
+                var relativeVelocity = _rigidbody.velocity - pointVelocity;
+                _rigidbody.velocity = pointVelocity + Vector3.Lerp(relativeVelocity, Vector3.zero, damping);
+            }
+
+            if (angularStrength > 0f)
+                _rigidbody.angularVelocity = Vector3.Lerp(_rigidbody.angularVelocity, carrierAngularVelocity, Mathf.Clamp01(angularStrength));
+
+            if (_rigidbody.collisionDetectionMode == CollisionDetectionMode.Discrete)
+                _rigidbody.collisionDetectionMode = CollisionDetectionMode.ContinuousDynamic;
+
+            CopyPhysicsToNetworkState();
+        }
+
+        private Vector3 ResolveHeldTargetPosition(Vector3 targetPosition)
+        {
+            var currentPosition = _rigidbody.position;
+            var delta = targetPosition - currentPosition;
+            var distance = delta.magnitude;
+
+            if (distance <= 0.0001f)
+                return targetPosition;
+
+            var direction = delta / distance;
+            var hits = _rigidbody.SweepTestAll(direction, distance + HeldCollisionSkin, QueryTriggerInteraction.Ignore);
+            System.Array.Sort(hits, (left, right) => left.distance.CompareTo(right.distance));
+
+            foreach (var hit in hits)
+            {
+                if (hit.collider == null || ContainsCollider(hit.collider))
+                    continue;
+
+                var grabbable = hit.collider.GetComponentInParent<GrabbablePhysicsObject>();
+                if (grabbable != null)
+                    continue;
+
+                var attachedRigidbody = hit.collider.attachedRigidbody;
+                if (attachedRigidbody != null && !attachedRigidbody.isKinematic)
+                    continue;
+
+                var safeDistance = Mathf.Max(0f, hit.distance - HeldCollisionSkin);
+                var blockedPosition = currentPosition + direction * Mathf.Min(safeDistance, distance);
+                var remainingDelta = targetPosition - blockedPosition;
+                var slideDelta = Vector3.ProjectOnPlane(remainingDelta, hit.normal);
+
+                return blockedPosition + slideDelta;
+            }
+
+            return targetPosition;
         }
 
         private bool EnsureHolderActive(PlayerRef holder)
@@ -222,6 +389,9 @@ namespace FriendSlop
 
             if (Holders.Contains(holder))
                 return true;
+
+            if (ShouldIgnoreRecentReleaseHolder(holder))
+                return false;
 
             if (Holders.Count >= Holders.Capacity)
                 return false;
@@ -238,6 +408,7 @@ namespace FriendSlop
         {
             if (!HasStateAuthority)
             {
+                PredictReleaseLocally(releasePosition, releaseVelocity);
                 RPC_EndGrab(holder, releasePosition, releaseVelocity);
                 return;
             }
@@ -252,6 +423,8 @@ namespace FriendSlop
         {
             if (!IsHeld)
                 return;
+
+            MarkRecentReleaseHolder(holder);
 
             if (holder == PlayerRef.None)
                 Holders.Clear();
@@ -270,16 +443,62 @@ namespace FriendSlop
 
             _holdHeartbeatTimer = default;
             _hasSmoothedHoldTarget = false;
+            _rigidbody.isKinematic = false;
             _rigidbody.position = releasePosition;
             _rigidbody.useGravity = true;
             _rigidbody.drag = 0f;
             _rigidbody.angularDrag = 0.05f;
             _rigidbody.collisionDetectionMode = _initialCollisionDetectionMode;
-            _rigidbody.interpolation = _initialInterpolation;
+            ApplyDynamicInterpolation();
             _rigidbody.WakeUp();
             _rigidbody.velocity = releaseVelocity;
             _rigidbody.angularVelocity = Random.insideUnitSphere * releaseVelocity.magnitude * 0.15f;
             CopyPhysicsToNetworkState();
+        }
+
+        private void PredictReleaseLocally(Vector3 releasePosition, Vector3 releaseVelocity)
+        {
+            if (_rigidbody == null)
+                return;
+
+            _localReleasePresentationUntil = Time.time + LocalReleasePredictionTime;
+            _rigidbody.isKinematic = false;
+            _rigidbody.position = releasePosition;
+            _rigidbody.rotation = transform.rotation;
+            _rigidbody.useGravity = true;
+            _rigidbody.drag = 0f;
+            _rigidbody.angularDrag = 0.05f;
+            _rigidbody.collisionDetectionMode = _initialCollisionDetectionMode;
+            ApplyDynamicInterpolation();
+            _rigidbody.WakeUp();
+            _rigidbody.velocity = releaseVelocity;
+            _rigidbody.angularVelocity = Random.insideUnitSphere * releaseVelocity.magnitude * 0.15f;
+            transform.position = releasePosition;
+        }
+
+        private bool IsLocalReleasePresentationActive()
+        {
+            return !HasStateAuthority && Time.time < _localReleasePresentationUntil;
+        }
+
+        private void MarkRecentReleaseHolder(PlayerRef holder)
+        {
+            if (Runner == null || holder == PlayerRef.None || ReleaseHoldIgnoreTime <= 0f)
+                return;
+
+            _recentReleaseHolder = holder;
+            _recentReleaseIgnoreTimer = TickTimer.CreateFromSeconds(Runner, ReleaseHoldIgnoreTime);
+        }
+
+        private bool ShouldIgnoreRecentReleaseHolder(PlayerRef holder)
+        {
+            if (Runner == null || holder == PlayerRef.None || holder != _recentReleaseHolder)
+                return false;
+
+            if (!_recentReleaseIgnoreTimer.IsRunning || _recentReleaseIgnoreTimer.Expired(Runner))
+                return false;
+
+            return true;
         }
 
         public int GetEffectiveWeightLevel(int holderCount)
@@ -360,6 +579,9 @@ namespace FriendSlop
             if (container == null || container == Object)
                 return;
 
+            if (_looseCargoLocked)
+                UnlockLooseCargo(Vector3.zero);
+
             Holders.Clear();
             RefreshHoldState();
             _holdHeartbeatTimer = default;
@@ -393,7 +615,7 @@ namespace FriendSlop
             _rigidbody.drag = 0f;
             _rigidbody.angularDrag = 0.05f;
             _rigidbody.collisionDetectionMode = _initialCollisionDetectionMode;
-            _rigidbody.interpolation = _initialInterpolation;
+            ApplyDynamicInterpolation();
             _rigidbody.velocity = releaseVelocity;
             _rigidbody.angularVelocity = Vector3.zero;
             _rigidbody.WakeUp();
@@ -557,7 +779,14 @@ namespace FriendSlop
                 return;
             }
 
-            _rigidbody.isKinematic = !HasStateAuthority;
+            if (IsLocalReleasePresentationActive())
+            {
+                _rigidbody.isKinematic = false;
+                _rigidbody.useGravity = true;
+                return;
+            }
+
+            _rigidbody.isKinematic = !HasStateAuthority || IsHeld || _looseCargoLocked;
             if (!HasStateAuthority)
                 _rigidbody.useGravity = false;
         }
@@ -622,7 +851,7 @@ namespace FriendSlop
             NetworkPosition = _rigidbody.position;
             NetworkRotation = _rigidbody.rotation;
 
-            if (IsPacked)
+            if (IsPacked || _looseCargoLocked)
             {
                 NetworkVelocity = Vector3.zero;
                 NetworkAngularVelocity = Vector3.zero;
@@ -633,8 +862,19 @@ namespace FriendSlop
             NetworkAngularVelocity = _rigidbody.angularVelocity;
         }
 
+        private void ApplyDynamicInterpolation()
+        {
+            if (_rigidbody == null)
+                return;
+
+            _rigidbody.interpolation = ForceDynamicInterpolation ? RigidbodyInterpolation.Interpolate : _initialInterpolation;
+        }
+
         private void ApplyNetworkStateToProxy(bool interpolate)
         {
+            if (IsLocalReleasePresentationActive())
+                return;
+
             _rigidbody.useGravity = false;
 
             if (!_rigidbody.isKinematic)

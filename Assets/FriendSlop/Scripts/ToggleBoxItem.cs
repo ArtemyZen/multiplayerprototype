@@ -27,6 +27,9 @@ namespace FriendSlop
         private Collider[] _cargoHits;
         private readonly List<GrabbablePhysicsObject> _packedCargo = new List<GrabbablePhysicsObject>();
         private Rigidbody _rigidbody;
+        private bool _hasPredictedOpen;
+        private bool _predictedOpen;
+        private float _predictedOpenUntil;
 
         public override void Spawned()
         {
@@ -62,6 +65,10 @@ namespace FriendSlop
         {
             if (!HasStateAuthority)
             {
+                if (_hasPredictedOpen && Time.time < _predictedOpenUntil)
+                    return;
+
+                SetPredictedOpen(!GetVisibleOpen());
                 RPC_Toggle(interactor);
                 return;
             }
@@ -109,11 +116,34 @@ namespace FriendSlop
         {
             CacheReferences();
 
+            var visibleOpen = GetVisibleOpen();
             if (OpenObject != null)
-                OpenObject.SetActive(IsOpen);
+                OpenObject.SetActive(visibleOpen);
 
             if (CloseObject != null)
-                CloseObject.SetActive(!IsOpen);
+                CloseObject.SetActive(!visibleOpen);
+        }
+
+        private bool GetVisibleOpen()
+        {
+            var networkOpen = (bool)IsOpen;
+            if (_hasPredictedOpen)
+            {
+                if (networkOpen == _predictedOpen || Time.time >= _predictedOpenUntil)
+                    _hasPredictedOpen = false;
+                else
+                    return _predictedOpen;
+            }
+
+            return networkOpen;
+        }
+
+        private void SetPredictedOpen(bool open)
+        {
+            _hasPredictedOpen = true;
+            _predictedOpen = open;
+            _predictedOpenUntil = Time.time + 1f;
+            ApplyState();
         }
 
         private void PackCargo()

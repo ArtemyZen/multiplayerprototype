@@ -15,6 +15,7 @@ namespace Starter.Shooter
 		public CanvasGroup CanvasGroup;
 		public TextMeshProUGUI ChickenCount;
 		public TextMeshProUGUI BestHunter;
+		public TextMeshProUGUI VersionText;
 		public GameObject AliveGroup;
 		public GameObject DeathGroup;
 		public Image[] HealthIndicators;
@@ -29,10 +30,18 @@ namespace Starter.Shooter
 		private int _lastChickens = -1;
 		private int _lastHealth = -1;
 		private PlayerRef _bestHunter;
+		private const int CurrentVersion = 60;
 
 		private void OnEnable()
 		{
 			BestHunter.gameObject.SetActive(false);
+			UpdateVersionText();
+		}
+
+		private void UpdateVersionText()
+		{
+			if (VersionText != null)
+				VersionText.text = $"Version {CurrentVersion}";
 		}
 
 		private void Update()

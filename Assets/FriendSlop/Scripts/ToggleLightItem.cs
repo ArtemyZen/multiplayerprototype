@@ -19,6 +19,9 @@ namespace FriendSlop
         [Networked] private NetworkBool IsOn { get; set; }
 
         private MaterialPropertyBlock _propertyBlock;
+        private bool _hasPredictedOn;
+        private bool _predictedOn;
+        private float _predictedOnUntil;
         private static readonly int EmissionColorId = Shader.PropertyToID("_EmissionColor");
 
         public override void Spawned()
@@ -50,6 +53,10 @@ namespace FriendSlop
         {
             if (!HasStateAuthority)
             {
+                if (_hasPredictedOn && Time.time < _predictedOnUntil)
+                    return;
+
+                SetPredictedOn(!GetVisibleOn());
                 RPC_Toggle(interactor);
                 return;
             }
@@ -79,13 +86,14 @@ namespace FriendSlop
         {
             CacheReferences();
 
+            var visibleOn = GetVisibleOn();
             foreach (var itemLight in Lights)
             {
                 if (itemLight != null)
-                    itemLight.enabled = IsOn;
+                    itemLight.enabled = visibleOn;
             }
 
-            var emissionColor = IsOn ? EmissionOnColor * EmissionIntensity : EmissionOffColor;
+            var emissionColor = visibleOn ? EmissionOnColor * EmissionIntensity : EmissionOffColor;
             foreach (var itemRenderer in EmissiveRenderers)
             {
                 if (itemRenderer == null)
@@ -95,6 +103,28 @@ namespace FriendSlop
                 _propertyBlock.SetColor(EmissionColorId, emissionColor);
                 itemRenderer.SetPropertyBlock(_propertyBlock);
             }
+        }
+
+        private bool GetVisibleOn()
+        {
+            var networkOn = (bool)IsOn;
+            if (_hasPredictedOn)
+            {
+                if (networkOn == _predictedOn || Time.time >= _predictedOnUntil)
+                    _hasPredictedOn = false;
+                else
+                    return _predictedOn;
+            }
+
+            return networkOn;
+        }
+
+        private void SetPredictedOn(bool on)
+        {
+            _hasPredictedOn = true;
+            _predictedOn = on;
+            _predictedOnUntil = Time.time + 1f;
+            ApplyState();
         }
 
         [Rpc(RpcSources.All, RpcTargets.StateAuthority)]

@@ -49,6 +49,8 @@ namespace FriendSlop
         private bool _grabRequiresRelease;
         private TickTimer _obstructionGraceTimer;
         private TickTimer _grabCooldownTimer;
+        private FriendSlopInputState _hostedInput;
+        private PlayerRef InteractionPlayer => Object != null && Object.InputAuthority != PlayerRef.None ? Object.InputAuthority : Object.StateAuthority;
 
         public override void Spawned()
         {
@@ -56,27 +58,39 @@ namespace FriendSlop
             _input = GetComponent<FriendSlopInput>();
             _playerColliders = GetComponentsInChildren<Collider>();
 
-            if (HasStateAuthority)
+            if (HasInputAuthority)
             {
+                FindObjectOfType<FriendSlopGameManager>()?.RegisterLocalPlayer(this);
                 Cursor.lockState = CursorLockMode.Locked;
                 Cursor.visible = false;
-                NetworkYaw = transform.eulerAngles.y;
             }
             else
             {
                 _input.enabled = false;
             }
+
+            if (HasStateAuthority)
+                NetworkYaw = transform.eulerAngles.y;
         }
 
         public override void FixedUpdateNetwork()
         {
+            if (HasInputAuthority && HasStateAuthority == false)
+            {
+                var currentInput = _input.Current;
+                RPC_SubmitInput(currentInput.LookDelta, currentInput.Move, currentInput.JumpPressed, currentInput.GrabHeld, currentInput.ThrowPressed, currentInput.InteractPressed);
+                _input.ResetAfterNetworkTick();
+                return;
+            }
+
             if (!HasStateAuthority)
                 return;
 
-            var input = _input.Current;
+            var input = HasInputAuthority ? _input.Current : _hostedInput;
             UpdateLook(input.LookDelta);
             Move(input);
             UpdateGrab(input);
+            _hostedInput = default;
             _input.ResetAfterNetworkTick();
         }
 
@@ -84,7 +98,7 @@ namespace FriendSlop
         {
             ApplyLookToTransforms();
 
-            if (HasStateAuthority && CameraHandle != null && Camera.main != null)
+            if (HasInputAuthority && CameraHandle != null && Camera.main != null)
                 Camera.main.transform.SetPositionAndRotation(CameraHandle.position, CameraHandle.rotation);
         }
 
@@ -174,7 +188,7 @@ namespace FriendSlop
             if (grabbable == null || !grabbable.CanBeGrabbed)
                 return;
 
-            if (grabbable.BeginGrab(Object.StateAuthority))
+            if (grabbable.BeginGrab(InteractionPlayer))
             {
                 _heldObject = grabbable;
                 _obstructionGraceTimer = TickTimer.CreateFromSeconds(Runner, ObstructionGraceTime);
@@ -187,7 +201,7 @@ namespace FriendSlop
             {
                 var heldAction = FindInterfaceInChildren<IHeldItemAction>(_heldObject.transform);
                 if (heldAction != null)
-                    heldAction.UseHeld(Object.StateAuthority, Object);
+                    heldAction.UseHeld(InteractionPlayer, Object);
 
                 return;
             }
@@ -200,7 +214,7 @@ namespace FriendSlop
 
             var interactable = FindInterfaceInParents<IWorldInteractable>(hit.collider.transform);
             if (interactable != null)
-                interactable.Interact(Object.StateAuthority, Object);
+                interactable.Interact(InteractionPlayer, Object);
         }
 
         private bool HasObstacleBetweenCameraAndHeldObject()
@@ -297,7 +311,7 @@ namespace FriendSlop
                 return;
 
             var dropPosition = HoldPoint != null ? HoldPoint.position + transform.forward * DropForwardOffset : transform.position + transform.forward;
-            _heldObject.EndGrab(Object.StateAuthority, dropPosition, Vector3.zero);
+            _heldObject.EndGrab(InteractionPlayer, dropPosition, Vector3.zero);
             _heldObject = null;
             _grabRequiresRelease = true;
             _grabCooldownTimer = TickTimer.CreateFromSeconds(Runner, GrabCooldownTime);
@@ -308,7 +322,7 @@ namespace FriendSlop
             if (_heldObject == null)
                 return;
 
-            _heldObject.EndGrab(Object.StateAuthority, _heldObject.Position, Vector3.zero);
+            _heldObject.EndGrab(InteractionPlayer, _heldObject.Position, Vector3.zero);
             _heldObject = null;
             _grabRequiresRelease = true;
             _grabCooldownTimer = TickTimer.CreateFromSeconds(Runner, GrabCooldownTime);
@@ -321,10 +335,27 @@ namespace FriendSlop
 
             var throwDirection = CameraHandle != null ? CameraHandle.forward : transform.forward;
             var throwPosition = HoldPoint != null ? HoldPoint.position : transform.position + throwDirection;
-            _heldObject.EndGrab(Object.StateAuthority, throwPosition, throwDirection * ThrowImpulse);
+            _heldObject.EndGrab(InteractionPlayer, throwPosition, throwDirection * ThrowImpulse);
             _heldObject = null;
             _grabRequiresRelease = true;
             _grabCooldownTimer = TickTimer.CreateFromSeconds(Runner, GrabCooldownTime);
+        }
+
+        [Rpc(RpcSources.InputAuthority, RpcTargets.StateAuthority, Channel = RpcChannel.Unreliable)]
+        private void RPC_SubmitInput(
+            Vector2 lookDelta,
+            Vector2 move,
+            NetworkBool jumpPressed,
+            NetworkBool grabHeld,
+            NetworkBool throwPressed,
+            NetworkBool interactPressed)
+        {
+            _hostedInput.LookDelta = lookDelta;
+            _hostedInput.Move = move;
+            _hostedInput.JumpPressed = jumpPressed;
+            _hostedInput.GrabHeld = grabHeld;
+            _hostedInput.ThrowPressed = throwPressed;
+            _hostedInput.InteractPressed = interactPressed;
         }
     }
 }

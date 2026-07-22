@@ -30,6 +30,13 @@ namespace FriendSlop
                 : "FriendSlopRoom";
 
             _runner = Instantiate(RunnerPrefab);
+            _runner.ProvideInput = true;
+
+            var inputProvider = _runner.GetComponent<ShooterFusionInputProvider>();
+            if (inputProvider == null)
+                inputProvider = _runner.gameObject.AddComponent<ShooterFusionInputProvider>();
+
+            _runner.AddCallbacks(inputProvider);
 
             var sceneInfo = new NetworkSceneInfo();
             sceneInfo.AddSceneRef(SceneRef.FromIndex(SceneManager.GetActiveScene().buildIndex));
@@ -38,7 +45,7 @@ namespace FriendSlop
 
             var result = await _runner.StartGame(new StartGameArgs
             {
-                GameMode = GameMode.Shared,
+                GameMode = GameMode.AutoHostOrClient,
                 SessionName = sessionName,
                 PlayerCount = MaxPlayers,
                 Scene = sceneInfo,

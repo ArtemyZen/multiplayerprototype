@@ -6,7 +6,7 @@ namespace Starter.Shooter
 	/// <summary>
 	/// Handles player connections (spawning of Player instances).
 	/// </summary>
-	public sealed class GameManager : NetworkBehaviour
+	public sealed class GameManager : NetworkBehaviour, IPlayerJoined, IPlayerLeft
 	{
 		public Player PlayerPrefab;
 
@@ -26,9 +26,33 @@ namespace Starter.Shooter
 		public override void Spawned()
 		{
 			_spawnPoints = FindObjectsOfType<SpawnPoint>();
+		}
 
-			LocalPlayer = Runner.Spawn(PlayerPrefab, GetSpawnPosition(), Quaternion.identity, Runner.LocalPlayer);
-			Runner.SetPlayerObject(Runner.LocalPlayer, LocalPlayer.Object);
+		public void RegisterLocalPlayer(Player player)
+		{
+			LocalPlayer = player;
+		}
+
+		public void PlayerJoined(PlayerRef player)
+		{
+			if (Runner.IsServer == false || PlayerPrefab == null)
+				return;
+
+			var playerObject = Runner.Spawn(PlayerPrefab, GetSpawnPosition(), Quaternion.identity, player);
+			Runner.SetPlayerObject(player, playerObject.Object);
+
+			if (player == Runner.LocalPlayer)
+				LocalPlayer = playerObject;
+		}
+
+		public void PlayerLeft(PlayerRef player)
+		{
+			if (Runner.IsServer == false)
+				return;
+
+			var playerObject = Runner.GetPlayerObject(player);
+			if (playerObject != null)
+				Runner.Despawn(playerObject);
 		}
 
 		public override void FixedUpdateNetwork()
@@ -48,7 +72,7 @@ namespace Starter.Shooter
 				if (player.Health.IsAlive && player.ChickenKills > bestHunterKills)
 				{
 					bestHunterKills = player.ChickenKills;
-					BestHunter = player.Object.StateAuthority;
+					BestHunter = player.Object.InputAuthority;
 				}
 			}
 		}

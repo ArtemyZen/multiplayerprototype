@@ -179,3 +179,36 @@ x86/
 
 # Publish Web Output
 *.[Pp]ublish.xml
+.vsconfig
+FRIENDSLOP_FEATURES.md
+unity-enable-voice-check.log
+unity-enable-voice-check-2.log
+unity-enable-voice-check-3.log
+unity-enable-voice-check-4.log
+unity-enable-voice-check-5.log
+unity-enable-voice-check-6.log
+unity-enable-voice-check-7.log
+unity-held-physics-smooth-check.log
+unity-held-presentation-check.log
+unity-held-snap-check.log
+unity-host-mode-check.log
+unity-interactor-disable-check.log
+unity-packed-kinematic-check.log
+unity-player-networked-state-check.log
+unity-v30-physics-revert-check.log
+unity-v31-held-kinematic-check.log
+unity-v32-held-render-present-check.log
+unity-v33-cargo-stabilization-check.log
+unity-v34-visible-cargo-lock-check.log
+unity-v35-cargo-render-present-check.log
+unity-v36-cargo-release-delay-check.log
+unity-v37-single-direct-grab-check.log
+unity-v38-held-sweep-slide-check.log
+unity-v39-light-prefab-fix-check.log
+unity-v40-cargo-api-restore-check.log
+unity-v41-client-prediction-check.log
+unity-v42-held-visual-prediction-check.log
+unity-v43-jump-throw-check.log
+unity-v44-interact-catch-check.log
+unity-v45-fusion-input-check.log
+unity-version-label-check.log

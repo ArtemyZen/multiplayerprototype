@@ -10,9 +10,6 @@ GameObject:
   m_Component:
   - component: {fileID: 3037977747709764045}
   - component: {fileID: 8591176354575355997}
-  - component: {fileID: 770100001499048849}
-  - component: {fileID: 770100001499048949}
-  - component: {fileID: 770100001499049049}
   m_Layer: 0
   m_Name: Point Light
   m_TagString: Untagged
@@ -97,7 +94,6 @@ Light:
   m_UseViewFrustumForShadowCasterCull: 1
   m_ShadowRadius: 0
   m_ShadowAngle: 0
-
 --- !u!1 &9048308291917780310
 GameObject:
   m_ObjectHideFlags: 0
@@ -110,10 +106,10 @@ GameObject:
   - component: {fileID: 9191871789776301488}
   - component: {fileID: 5199116264195439848}
   - component: {fileID: 5082735412330173665}
-  - component: {fileID: 5057885219748624884}
-  - component: {fileID: 6772174136915184804}
-  - component: {fileID: 1429747001925806043}
-  - component: {fileID: 1520740033996619415}
+  - component: {fileID: 770100001499048749}
+  - component: {fileID: 770100001499048849}
+  - component: {fileID: 770100001499048949}
+  - component: {fileID: 770100001499049049}
   m_Layer: 0
   m_Name: Light
   m_TagString: Untagged
@@ -208,21 +204,49 @@ BoxCollider:
   serializedVersion: 3
   m_Size: {x: 1, y: 1, z: 1}
   m_Center: {x: 0, y: 0, z: 0}
+--- !u!54 &770100001499048749
+Rigidbody:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 9048308291917780310}
+  serializedVersion: 4
+  m_Mass: 1
+  m_Drag: 0
+  m_AngularDrag: 0.05
+  m_CenterOfMass: {x: 0, y: 0, z: 0}
+  m_InertiaTensor: {x: 1, y: 1, z: 1}
+  m_InertiaRotation: {x: 0, y: 0, z: 0, w: 1}
+  m_IncludeLayers:
+    serializedVersion: 2
+    m_Bits: 0
+  m_ExcludeLayers:
+    serializedVersion: 2
+    m_Bits: 0
+  m_ImplicitCom: 1
+  m_ImplicitTensor: 1
+  m_UseGravity: 1
+  m_IsKinematic: 0
+  m_Interpolate: 1
+  m_Constraints: 0
+  m_CollisionDetection: 2
 --- !u!114 &770100001499048849
 MonoBehaviour:
   m_ObjectHideFlags: 0
   m_CorrespondingSourceObject: {fileID: 0}
   m_PrefabInstance: {fileID: 0}
   m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 4623535889982019365}
+  m_GameObject: {fileID: 9048308291917780310}
   m_Enabled: 1
   m_EditorHideFlags: 0
   m_Script: {fileID: -1552182283, guid: e725a070cec140c4caffb81624c8c787, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
-  SortKey: 1499048849
-  ObjectInterest: 1
-  Flags: 786433
+  SortKey: 3643875011
+  SendPriority: 1
+  EnableInterpolation: 1
+  Flags: 786434
   NestedObjects: []
   NetworkedBehaviours:
   - {fileID: 770100001499048949}
@@ -234,7 +258,7 @@ MonoBehaviour:
   m_CorrespondingSourceObject: {fileID: 0}
   m_PrefabInstance: {fileID: 0}
   m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 4623535889982019365}
+  m_GameObject: {fileID: 9048308291917780310}
   m_Enabled: 1
   m_EditorHideFlags: 0
   m_Script: {fileID: 11500000, guid: 95b30250245a1094185b14da4c0879bd, type: 3}
@@ -245,6 +269,8 @@ MonoBehaviour:
   WeightReductionPerHolder: 2
   ApplyWeightToRigidbodyMass: 1
   HeavyWeightMassMultiplier: 5
+  HeldCollisionSkin: 0.03
+  ForceDynamicInterpolation: 1
   MaxHoldSpeed: 18
   ProxyLerpSpeed: 18
   HoldTargetSmoothing: 18
@@ -255,7 +281,7 @@ MonoBehaviour:
   m_CorrespondingSourceObject: {fileID: 0}
   m_PrefabInstance: {fileID: 0}
   m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 4623535889982019365}
+  m_GameObject: {fileID: 9048308291917780310}
   m_Enabled: 1
   m_EditorHideFlags: 0
   m_Script: {fileID: 11500000, guid: 2a255ac790b9e9145bda8cbdf4381584, type: 3}

@@ -25,7 +25,7 @@ Transform:
   m_GameObject: {fileID: 2434354936479954621}
   serializedVersion: 2
   m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
-  m_LocalPosition: {x: 5.9543485e-15, y: 0.14999998, z: 1.5}
+  m_LocalPosition: {x: 0, y: 0.622, z: 1.619}
   m_LocalScale: {x: 1, y: 1, z: 1}
   m_ConstrainProportionsScale: 0
   m_Children: []
@@ -355,8 +355,12 @@ MonoBehaviour:
   - {fileID: 9101397391339694623}
   WalkSpeed: 5
   JumpImpulse: 10
+  JumpInputCooldown: 0.15
   UpGravity: -25
   DownGravity: -40
+  PredictLocalJumpCamera: 1
+  LocalCameraJumpGroundSnapSpeed: 30
+  LocalCameraJumpMaxCorrection: 5
   GroundAcceleration: 10
   GroundDeceleration: 10
   AirAcceleration: 10
@@ -491,6 +495,7 @@ MonoBehaviour:
   GrabCrosshair: {fileID: 21300000, guid: 37e47e50eb35cac4299a7fce960c05ea, type: 3}
   AutoFindCrosshairImage: 1
   InteractDistance: 3
+  InteractCooldownTime: 0.25
   GrabDistance: 2
   HoldDistance: 0
   HoldMoveSpeed: 24
@@ -514,6 +519,7 @@ MonoBehaviour:
   CatchRadius: 0.85
   CatchMinObjectSpeed: 1.5
   CatchMaxAngle: 80
+  SelfCatchBlockTime: 0.6
   CanCarryPlayers: 1
   PlayerCarryDistance: 1.3
   PlayerCarryMoveSpeed: 18

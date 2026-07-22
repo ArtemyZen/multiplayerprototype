@@ -3,7 +3,7 @@ using Fusion;
 
 namespace FriendSlop
 {
-    public sealed class FriendSlopGameManager : NetworkBehaviour
+    public sealed class FriendSlopGameManager : NetworkBehaviour, IPlayerJoined, IPlayerLeft
     {
         [Header("Player")]
         public FirstPersonNetworkPlayer PlayerPrefab;
@@ -17,11 +17,34 @@ namespace FriendSlop
             if (PlayerPrefab == null)
             {
                 Debug.LogError("FriendSlopGameManager needs a PlayerPrefab.", this);
-                return;
             }
+        }
 
-            LocalPlayer = Runner.Spawn(PlayerPrefab, GetSpawnPosition(), GetSpawnRotation(), Runner.LocalPlayer);
-            Runner.SetPlayerObject(Runner.LocalPlayer, LocalPlayer.Object);
+        public void RegisterLocalPlayer(FirstPersonNetworkPlayer player)
+        {
+            LocalPlayer = player;
+        }
+
+        public void PlayerJoined(PlayerRef player)
+        {
+            if (Runner.IsServer == false || PlayerPrefab == null)
+                return;
+
+            var playerObject = Runner.Spawn(PlayerPrefab, GetSpawnPosition(), GetSpawnRotation(), player);
+            Runner.SetPlayerObject(player, playerObject.Object);
+
+            if (player == Runner.LocalPlayer)
+                LocalPlayer = playerObject;
+        }
+
+        public void PlayerLeft(PlayerRef player)
+        {
+            if (Runner.IsServer == false)
+                return;
+
+            var playerObject = Runner.GetPlayerObject(player);
+            if (playerObject != null)
+                Runner.Despawn(playerObject);
         }
 
         public override void Despawned(NetworkRunner runner, bool hasState)
