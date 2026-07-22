@@ -50,7 +50,7 @@ namespace Starter
 
 			var startArguments = new StartGameArgs()
 			{
-				GameMode = Application.isEditor && ForceSinglePlayer ? GameMode.Single : GameMode.AutoHostOrClient,
+				GameMode = Application.isEditor && ForceSinglePlayer ? GameMode.Single : GameMode.Shared,
 				SessionName = RoomText.text,
 				PlayerCount = MaxPlayerCount,
 				// We need to specify a session property for matchmaking to decide where the player wants to join.

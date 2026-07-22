@@ -105,7 +105,7 @@ namespace FriendSlop
         [Networked] public Vector3 StickyHandTargetPosition { get; private set; }
         public bool CanReadStickyHandState => Object != null && Object.IsValid;
         private bool CanUseNetworkState => Object != null && Object.IsValid;
-        private PlayerRef InteractionPlayer => Object != null && Object.InputAuthority != PlayerRef.None ? Object.InputAuthority : Object.StateAuthority;
+        private PlayerRef InteractionPlayer => Runner != null ? Runner.LocalPlayer : PlayerRef.None;
 
         public override void Spawned()
         {
@@ -114,15 +114,13 @@ namespace FriendSlop
             _playerColliders = GetComponentsInChildren<Collider>();
             _baseWalkSpeed = _player.WalkSpeed;
             _wasAlive = IsPlayerAlive();
-            enabled = HasInputAuthority;
-
-            if (HasInputAuthority || HasStateAuthority)
-                SetHoldingPoseActive(false);
+            SetHoldingPoseActive(false);
+            enabled = HasStateAuthority;
         }
 
         private void Update()
         {
-            if (!HasInputAuthority)
+            if (!HasStateAuthority)
                 return;
 
             if (Cursor.lockState != CursorLockMode.Locked)
@@ -177,7 +175,7 @@ namespace FriendSlop
 
         public override void FixedUpdateNetwork()
         {
-            if (!HasInputAuthority)
+            if (!HasStateAuthority)
                 return;
 
             var isAlive = IsPlayerAlive();
@@ -307,10 +305,10 @@ namespace FriendSlop
 
         private void LateUpdate()
         {
-            if (!HasInputAuthority || _heldObject == null)
+            if (!HasStateAuthority || _heldObject == null)
                 return;
 
-            _heldObject.PresentHeldLocally(InteractionPlayer, GetHoldPosition(), GetAimRotation(), !HasStateAuthority);
+            _heldObject.PresentHeldLocally(InteractionPlayer, GetHoldPosition(), GetAimRotation(), true);
         }
 
         private bool IsPlayerAlive()
@@ -332,10 +330,7 @@ namespace FriendSlop
             if (!CanUseNetworkState)
                 return;
 
-            if (HasStateAuthority)
-                _player.HoldingItemPoseActive = active;
-            else
-                RPC_SetHoldingPoseActive(active);
+            _player.HoldingItemPoseActive = active;
         }
 
         private bool ShouldShowHoldPose()
@@ -427,15 +422,8 @@ namespace FriendSlop
             if (!CanUseNetworkState)
                 return;
 
-            if (HasStateAuthority)
-            {
-                StickyHandActive = active;
-                StickyHandTargetPosition = targetPosition;
-            }
-            else
-            {
-                RPC_SetStickyHandState(active, targetPosition);
-            }
+            StickyHandActive = active;
+            StickyHandTargetPosition = targetPosition;
         }
 
         private float GetHeldWeightEfficiency()
@@ -1157,19 +1145,6 @@ namespace FriendSlop
             return cameraHandle != null ? cameraHandle.forward : transform.forward;
         }
 
-        [Rpc(RpcSources.InputAuthority, RpcTargets.StateAuthority, Channel = RpcChannel.Unreliable)]
-        private void RPC_SetHoldingPoseActive(NetworkBool active)
-        {
-            if (_player != null)
-                _player.HoldingItemPoseActive = active;
-        }
-
-        [Rpc(RpcSources.InputAuthority, RpcTargets.StateAuthority, Channel = RpcChannel.Unreliable)]
-        private void RPC_SetStickyHandState(NetworkBool active, Vector3 targetPosition)
-        {
-            StickyHandActive = active;
-            StickyHandTargetPosition = targetPosition;
-        }
     }
 }
 

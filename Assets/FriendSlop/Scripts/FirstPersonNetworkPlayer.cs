@@ -49,8 +49,7 @@ namespace FriendSlop
         private bool _grabRequiresRelease;
         private TickTimer _obstructionGraceTimer;
         private TickTimer _grabCooldownTimer;
-        private FriendSlopInputState _hostedInput;
-        private PlayerRef InteractionPlayer => Object != null && Object.InputAuthority != PlayerRef.None ? Object.InputAuthority : Object.StateAuthority;
+        private PlayerRef InteractionPlayer => Runner != null ? Runner.LocalPlayer : PlayerRef.None;
 
         public override void Spawned()
         {
@@ -58,39 +57,27 @@ namespace FriendSlop
             _input = GetComponent<FriendSlopInput>();
             _playerColliders = GetComponentsInChildren<Collider>();
 
-            if (HasInputAuthority)
+            if (HasStateAuthority)
             {
-                FindObjectOfType<FriendSlopGameManager>()?.RegisterLocalPlayer(this);
                 Cursor.lockState = CursorLockMode.Locked;
                 Cursor.visible = false;
+                NetworkYaw = transform.eulerAngles.y;
             }
             else
             {
                 _input.enabled = false;
             }
-
-            if (HasStateAuthority)
-                NetworkYaw = transform.eulerAngles.y;
         }
 
         public override void FixedUpdateNetwork()
         {
-            if (HasInputAuthority && HasStateAuthority == false)
-            {
-                var currentInput = _input.Current;
-                RPC_SubmitInput(currentInput.LookDelta, currentInput.Move, currentInput.JumpPressed, currentInput.GrabHeld, currentInput.ThrowPressed, currentInput.InteractPressed);
-                _input.ResetAfterNetworkTick();
-                return;
-            }
-
             if (!HasStateAuthority)
                 return;
 
-            var input = HasInputAuthority ? _input.Current : _hostedInput;
+            var input = _input.Current;
             UpdateLook(input.LookDelta);
             Move(input);
             UpdateGrab(input);
-            _hostedInput = default;
             _input.ResetAfterNetworkTick();
         }
 
@@ -98,7 +85,7 @@ namespace FriendSlop
         {
             ApplyLookToTransforms();
 
-            if (HasInputAuthority && CameraHandle != null && Camera.main != null)
+            if (HasStateAuthority && CameraHandle != null && Camera.main != null)
                 Camera.main.transform.SetPositionAndRotation(CameraHandle.position, CameraHandle.rotation);
         }
 
@@ -341,22 +328,6 @@ namespace FriendSlop
             _grabCooldownTimer = TickTimer.CreateFromSeconds(Runner, GrabCooldownTime);
         }
 
-        [Rpc(RpcSources.InputAuthority, RpcTargets.StateAuthority, Channel = RpcChannel.Unreliable)]
-        private void RPC_SubmitInput(
-            Vector2 lookDelta,
-            Vector2 move,
-            NetworkBool jumpPressed,
-            NetworkBool grabHeld,
-            NetworkBool throwPressed,
-            NetworkBool interactPressed)
-        {
-            _hostedInput.LookDelta = lookDelta;
-            _hostedInput.Move = move;
-            _hostedInput.JumpPressed = jumpPressed;
-            _hostedInput.GrabHeld = grabHeld;
-            _hostedInput.ThrowPressed = throwPressed;
-            _hostedInput.InteractPressed = interactPressed;
-        }
     }
 }
 
