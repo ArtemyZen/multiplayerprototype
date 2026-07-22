@@ -782,7 +782,7 @@ namespace FriendSlop
             if (_minimumHoldTimer.IsRunning && !_minimumHoldTimer.Expired(Runner))
                 return false;
 
-            return Vector3.Distance(GetHoldPosition(), _heldObject.Position) > MaxHoldStretchDistance;
+            return Vector3.Distance(GetHoldPosition(), _heldObject.Center) > MaxHoldStretchDistance;
         }
 
         private void HoldOrReleaseCarriedPlayer()
@@ -817,7 +817,7 @@ namespace FriendSlop
                 return false;
 
             var origin = cameraHandle.position;
-            var target = _heldObject.Position;
+            var target = _heldObject.Center;
             var toTarget = target - origin;
             var distance = toTarget.magnitude;
 

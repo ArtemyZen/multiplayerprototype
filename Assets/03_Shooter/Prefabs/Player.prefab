@@ -24,12 +24,12 @@ Transform:
   m_PrefabAsset: {fileID: 0}
   m_GameObject: {fileID: 2434354936479954621}
   serializedVersion: 2
-  m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
-  m_LocalPosition: {x: 0, y: 0.622, z: 1.619}
+  m_LocalRotation: {x: -0, y: -0, z: -0, w: 1}
+  m_LocalPosition: {x: 0.5, y: -0, z: 1.5}
   m_LocalScale: {x: 1, y: 1, z: 1}
   m_ConstrainProportionsScale: 0
   m_Children: []
-  m_Father: {fileID: 4348685969970783698}
+  m_Father: {fileID: 53799290566343439}
   m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
 --- !u!1 &2658459191967393666
 GameObject:
@@ -355,12 +355,8 @@ MonoBehaviour:
   - {fileID: 9101397391339694623}
   WalkSpeed: 5
   JumpImpulse: 10
-  JumpInputCooldown: 0.15
   UpGravity: -25
   DownGravity: -40
-  PredictLocalJumpCamera: 1
-  LocalCameraJumpGroundSnapSpeed: 30
-  LocalCameraJumpMaxCorrection: 5
   GroundAcceleration: 10
   GroundDeceleration: 10
   AirAcceleration: 10
@@ -514,6 +510,7 @@ MonoBehaviour:
   HolderValidationGiveUpTime: 4
   MaxHoldStretchDistance: 3.5
   HoldStretchReleaseTicks: 8
+  MinThrowHeldDistanceRatio: 0.8
   EnableCatchAssist: 1
   CatchDistance: 3.25
   CatchRadius: 0.85
@@ -5906,7 +5903,8 @@ Transform:
   m_LocalPosition: {x: 0, y: 0.40949994, z: 0}
   m_LocalScale: {x: 1, y: 1, z: 1}
   m_ConstrainProportionsScale: 0
-  m_Children: []
+  m_Children:
+  - {fileID: 3551349371018297251}
   m_Father: {fileID: 4348685969970783698}
   m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
 --- !u!1 &6353202220506646774
@@ -11019,7 +11017,6 @@ Transform:
   m_Children:
   - {fileID: 53799290566343439}
   - {fileID: 536988984119202717}
-  - {fileID: 3551349371018297251}
   m_Father: {fileID: 1142867646521763857}
   m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
 --- !u!1 &8394160489372375921

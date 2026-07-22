@@ -29,6 +29,7 @@ namespace FriendSlop
         [Tooltip("Ignores late hold RPCs from a player for a short time after that player released/threw this object.")]
         public float ReleaseHoldIgnoreTime = 0.25f;
         public float LocalReleasePredictionTime = 0.2f;
+        public bool HoldByColliderCenter = true;
 
         [Networked, Capacity(16)] private NetworkLinkedList<PlayerRef> Holders => default;
         [Networked] public PlayerRef Holder { get; private set; }
@@ -55,6 +56,7 @@ namespace FriendSlop
         private Vector3 _holdTargetPositionSum;
         private Vector3 _smoothedHoldTargetPosition;
         private bool _hasSmoothedHoldTarget;
+        private Vector3 _holdCenterLocalOffset;
         private TickTimer _holdHeartbeatTimer;
         private bool _collidersDisabledForPacking;
         private bool _packedPresentationApplied;
@@ -127,6 +129,8 @@ namespace FriendSlop
 
         public bool BeginGrab(PlayerRef holder)
         {
+            CaptureHoldCenterOffset();
+
             if (!HasStateAuthority)
             {
                 if (!IsHeld)
@@ -159,6 +163,7 @@ namespace FriendSlop
             if (Holders.Count >= Holders.Capacity)
                 return false;
 
+            CaptureHoldCenterOffset();
             Holders.Add(holder);
             RefreshHoldState();
             RefreshHoldHeartbeat();
@@ -215,7 +220,7 @@ namespace FriendSlop
             _smoothedHoldTargetPosition = _holdTargetPositionSum / _holdTargetCount;
             _hasSmoothedHoldTarget = true;
             _rigidbody.WakeUp();
-            _rigidbody.MovePosition(ResolveHeldTargetPosition(_smoothedHoldTargetPosition));
+            _rigidbody.MovePosition(ResolveHeldTargetPosition(GetPivotPositionForHeldCenter(_smoothedHoldTargetPosition, targetRotation)));
             _rigidbody.MoveRotation(targetRotation);
             CopyPhysicsToNetworkState();
         }
@@ -228,10 +233,32 @@ namespace FriendSlop
             if (!forceLocalPrediction && (!HasStateAuthority || !IsHeldBy(holder)))
                 return;
 
-            var resolvedPosition = ResolveHeldTargetPosition(targetPosition);
+            var resolvedPosition = ResolveHeldTargetPosition(GetPivotPositionForHeldCenter(targetPosition, targetRotation));
             _rigidbody.position = resolvedPosition;
             _rigidbody.rotation = targetRotation;
             transform.SetPositionAndRotation(resolvedPosition, targetRotation);
+        }
+
+        private void CaptureHoldCenterOffset()
+        {
+            if (_rigidbody == null)
+                _rigidbody = GetComponent<Rigidbody>();
+
+            if (_rigidbody == null || !HoldByColliderCenter)
+            {
+                _holdCenterLocalOffset = Vector3.zero;
+                return;
+            }
+
+            _holdCenterLocalOffset = Quaternion.Inverse(_rigidbody.rotation) * (Center - _rigidbody.position);
+        }
+
+        private Vector3 GetPivotPositionForHeldCenter(Vector3 targetCenterPosition, Quaternion targetRotation)
+        {
+            if (!HoldByColliderCenter)
+                return targetCenterPosition;
+
+            return targetCenterPosition - targetRotation * _holdCenterLocalOffset;
         }
 
         public void PresentLooseCargoLocally(Transform containerTransform, Vector3 localPosition, Quaternion localRotation)
@@ -461,6 +488,7 @@ namespace FriendSlop
 
             _holdHeartbeatTimer = default;
             _hasSmoothedHoldTarget = false;
+            _holdCenterLocalOffset = Vector3.zero;
             _rigidbody.isKinematic = false;
             _rigidbody.position = releasePosition;
             _rigidbody.useGravity = true;

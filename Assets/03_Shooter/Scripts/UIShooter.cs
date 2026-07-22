@@ -30,7 +30,7 @@ namespace Starter.Shooter
 		private int _lastChickens = -1;
 		private int _lastHealth = -1;
 		private PlayerRef _bestHunter;
-		private const int CurrentVersion = 66;
+		private const int CurrentVersion = 74;
 
 		private void OnEnable()
 		{
